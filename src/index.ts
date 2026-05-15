@@ -27,11 +27,29 @@ export class TradingAgent extends Agent<Env> {
   }
 
   async initKite() {
-    if (this.kite) return this.kite;
+    if (this.kite) {
+      // Check for memory-cached expiry
+      const expiry = await this.ctx.storage.get<number>("kite_token_expiry");
+      if (expiry && Date.now() > expiry) {
+        console.warn("[Agent] Kite session expired (10-minute TTL).");
+        this.kite = null;
+        await this.ctx.storage.delete("kite_access_token");
+        await this.ctx.storage.delete("kite_token_expiry");
+      } else {
+        return this.kite;
+      }
+    }
     
     console.log("[Agent] Initializing Kite SDK...");
-    if (!this.env.KITE_API_KEY) {
-      console.warn("[Agent] KITE_API_KEY is missing from environment!");
+    const accessToken = await this.ctx.storage.get<string>("kite_access_token");
+    const expiry = await this.ctx.storage.get<number>("kite_token_expiry");
+
+    // Enforce 10-minute expiry
+    if (accessToken && expiry && Date.now() > expiry) {
+      console.warn("[Agent] Kite session expired (10-minute TTL). Cleaning up...");
+      await this.ctx.storage.delete("kite_access_token");
+      await this.ctx.storage.delete("kite_token_expiry");
+      return new (KiteConnect as any)({ api_key: this.env.KITE_API_KEY });
     }
 
     try {
@@ -39,7 +57,6 @@ export class TradingAgent extends Agent<Env> {
         api_key: this.env.KITE_API_KEY
       });
 
-      const accessToken = await this.ctx.storage.get<string>("kite_access_token");
       if (accessToken) {
         this.kite!.setAccessToken(accessToken);
       }
@@ -126,7 +143,12 @@ export class TradingAgent extends Agent<Env> {
 
     try {
       const response = await kite.generateSession(requestToken, this.env.KITE_API_SECRET);
+      
+      // Set 10-minute expiry
+      const expiry = Date.now() + (10 * 60 * 1000);
       await this.ctx.storage.put("kite_access_token", response.access_token);
+      await this.ctx.storage.put("kite_token_expiry", expiry);
+      
       this.kite = kite;
       this.kite.setAccessToken(response.access_token);
       return { status: "success", user: response.user_name };
@@ -154,6 +176,12 @@ export class TradingAgent extends Agent<Env> {
   }
 
 
+
+  @callable()
+  async logFromWorkflow(msg: string) {
+    console.log(`[Workflow Log] ${msg}`);
+    return { status: "ok" };
+  }
 
   @callable()
   async storeTradeState(opportunities: any[], workflowId: string) {

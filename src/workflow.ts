@@ -10,43 +10,43 @@ export class TradingWorkflow extends AgentWorkflow<any, { amount: number }> {
 
     // 1. Analyze Market
     const opportunities = await step.do("analyze-market", async () => {
-      console.log(`[Workflow] Analyzing market... (Mock: ${event.payload.mock})`);
+      await agent.logFromWorkflow(`Analyzing market... (Mock: ${event.payload.mock})`);
       const results = await agent.findOpportunities({
         min_fall_pct: -2.0,
         min_rsi: 50,
         mock: event.payload.mock
       });
-      console.log(`[Workflow] Found ${results?.length || 0} opportunities.`);
+      await agent.logFromWorkflow(`Found ${results?.length || 0} opportunities.`);
       return results;
     });
 
     if (!opportunities || opportunities.length === 0) {
-      console.log("[Workflow] No opportunities found today.");
+      await agent.logFromWorkflow("No opportunities found today.");
       return;
     }
 
     // 2. Store state for interactive bot
     await step.do("store-state", async () => {
-      console.log("[Workflow] Storing state for bot via agent call...");
+      await agent.logFromWorkflow("Storing state for bot via agent call...");
       await agent.storeTradeState(opportunities, this.workflowId);
     });
 
     // 3. Notify via Telegram
     await step.do("notify-user", async () => {
-      console.log("[Workflow] Starting notify-user step...");
-      console.log("[Workflow] Env keys available:", Object.keys(env));
+      await agent.logFromWorkflow("Starting notify-user step...");
+      await agent.logFromWorkflow(`Env keys: ${Object.keys(env).join(", ")}`);
       
       if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
-        console.error("[Workflow] CRITICAL: Telegram credentials missing from env!");
+        await agent.logFromWorkflow("CRITICAL: Telegram credentials missing from env!");
       }
 
       let loginStatus;
       try {
-        console.log("[Workflow] Checking Kite login status...");
+        await agent.logFromWorkflow("Checking Kite login status...");
         loginStatus = await agent.checkKiteLogin();
-        console.log("[Workflow] Kite status:", loginStatus.status);
+        await agent.logFromWorkflow(`Kite status: ${loginStatus.status}`);
       } catch (err: any) {
-        console.warn("[Workflow] Kite check failed:", err.message);
+        await agent.logFromWorkflow(`Kite check failed: ${err.message}`);
         loginStatus = { status: "disconnected", loginUrl: "" };
       }
       
@@ -61,15 +61,15 @@ Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi.toFixed(1)})\n
         message += `Reply with \`trade <amount>\` (e.g., \`trade 1000\`) to continue.`;
       }
 
-      console.log("[Workflow] Calling sendTelegramMessage...");
+      await agent.logFromWorkflow("Calling sendTelegramMessage...");
       try {
         await sendTelegramMessage(message, {
           botToken: env.TELEGRAM_BOT_TOKEN,
           chatId: env.TELEGRAM_CHAT_ID
         });
-        console.log("[Workflow] sendTelegramMessage completed successfully.");
+        await agent.logFromWorkflow("sendTelegramMessage completed successfully.");
       } catch (err: any) {
-        console.error("[Workflow] sendTelegramMessage failed:", err.message);
+        await agent.logFromWorkflow(`sendTelegramMessage failed: ${err.message}`);
         throw err;
       }
     });
