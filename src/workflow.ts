@@ -2,6 +2,101 @@ import { AgentWorkflow, AgentWorkflowStep, AgentWorkflowEvent } from "agents/wor
 import { TradingAgent } from "./index";
 import { sendTelegramMessage } from "./notifications";
 
+export class TradingWorkflow extends AgentWorkflow<any, { amount: number }> {
+  async run(event: AgentWorkflowEvent<{ amount: number }>, step: AgentWorkflowStep) {
+    const agent = this.agent as TradingAgent;
+    const env = this.env as any;
+    const { amount } = event.payload;
+
+    // 1. Analyze Market
+    const opportunities = await step.do("analyze-market", async () => {
+      console.log(`[Workflow] Analyzing market... (Mock: ${event.payload.mock})`);
+      const results = await agent.findOpportunities({
+        min_fall_pct: -2.0,
+        min_rsi: 50,
+        mock: event.payload.mock
+      });
+      console.log(`[Workflow] Found ${results?.length || 0} opportunities.`);
+      return results;
+    });
+
+    if (!opportunities || opportunities.length === 0) {
+      console.log("[Workflow] No opportunities found today.");
+      return;
+    }
+
+    // 2. Store state for interactive bot
+    await step.do("store-state", async () => {
+      console.log("[Workflow] Storing state for bot via agent call...");
+      await agent.storeTradeState(opportunities, this.workflowId);
+    });
+
+    // 3. Notify via Telegram
+    await step.do("notify-user", async () => {
+      console.log("[Workflow] Starting notify-user step...");
+      console.log("[Workflow] Env keys available:", Object.keys(env));
+      
+      if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+        console.error("[Workflow] CRITICAL: Telegram credentials missing from env!");
+      }
+
+      let loginStatus;
+      try {
+        console.log("[Workflow] Checking Kite login status...");
+        loginStatus = await agent.checkKiteLogin();
+        console.log("[Workflow] Kite status:", loginStatus.status);
+      } catch (err: any) {
+        console.warn("[Workflow] Kite check failed:", err.message);
+        loginStatus = { status: "disconnected", loginUrl: "" };
+      }
+      
+      let message = `🚀 *Stock Alert*
+Found ${opportunities.length} buy opportunities.
+Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi.toFixed(1)})\n\n`;
+
+      if (loginStatus.status === "disconnected") {
+        const loginUrl = `${env.BASE_URL}/kite-login?token=${env.AUTH_TOKEN}`;
+        message += `⚠️ *Action Required*: Your Kite session has expired.\n1. [Login to Kite](${loginUrl})\n2. After logging in, type "trade <amount>" below.\n\n`;
+      } else {
+        message += `Reply with \`trade <amount>\` (e.g., \`trade 1000\`) to continue.`;
+      }
+
+      console.log("[Workflow] Calling sendTelegramMessage...");
+      try {
+        await sendTelegramMessage(message, {
+          botToken: env.TELEGRAM_BOT_TOKEN,
+          chatId: env.TELEGRAM_CHAT_ID
+        });
+        console.log("[Workflow] sendTelegramMessage completed successfully.");
+      } catch (err: any) {
+        console.error("[Workflow] sendTelegramMessage failed:", err.message);
+        throw err;
+      }
+    });
+
+    // 4. Wait for Approval (Human-in-the-loop via Bot)
+    await this.waitForApproval(step, {
+      timeout: "1 hour",
+      stepName: "User Approval"
+    });
+
+    // 5. Fetch the interactive amount set by the bot
+    const finalAmount = await step.do("get-final-amount", async () => {
+      return await agent.ctx.storage.get<number>("pending_amount") || amount;
+    });
+
+    // 6. Place Orders
+    const results = await step.do("place-orders", async () => {
+      return await agent.executeOrders({
+        amount: finalAmount,
+        opportunities: opportunities
+      });
+    });
+
+    return results;
+  }
+}
+
 export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
   async run(event: AgentWorkflowEvent<{}>, step: AgentWorkflowStep) {
     const agent = this.agent as TradingAgent;

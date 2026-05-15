@@ -15,7 +15,8 @@
 		"__filename": "\"\""
 	},
 	"vars": {
-		"MCP_SERVER_URL": "https://stock-mcp.durgadas.in/mcp"
+		"MCP_SERVER_URL": "https://stock-mcp.durgadas.in/mcp",
+		"BASE_URL": "https://cf-stock-trading-agent.durgadas.in"
 	},
 	"durable_objects": {
 		"bindings": [
@@ -27,6 +28,11 @@
 	},
 	"workflows": [
 		{
+			"name": "trading-workflow",
+			"binding": "TRADING_WORKFLOW",
+			"class_name": "TradingWorkflow"
+		},
+		{
 			"name": "watchlist-analysis-workflow",
 			"binding": "WATCHLIST_ANALYSIS_WORKFLOW",
 			"class_name": "WatchlistAnalysisWorkflow"
@@ -34,6 +40,7 @@
 	],
 	"triggers": {
 		"crons": [
+			"40 9 * * *",
 			"15 9 * * *"
 		]
 	},

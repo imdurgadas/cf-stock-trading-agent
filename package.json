@@ -17,6 +17,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "agents": "^0.12.4",
+    "kiteconnect": "^5.3.0",
     "zod": "^4.4.3"
   }
 }
