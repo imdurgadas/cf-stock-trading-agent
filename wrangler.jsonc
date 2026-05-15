@@ -27,11 +27,6 @@
 	},
 	"workflows": [
 		{
-			"name": "trading-workflow",
-			"binding": "TRADING_WORKFLOW",
-			"class_name": "TradingWorkflow"
-		},
-		{
 			"name": "watchlist-analysis-workflow",
 			"binding": "WATCHLIST_ANALYSIS_WORKFLOW",
 			"class_name": "WatchlistAnalysisWorkflow"
@@ -39,7 +34,6 @@
 	],
 	"triggers": {
 		"crons": [
-			"40 9 * * *",
 			"15 9 * * *"
 		]
 	},

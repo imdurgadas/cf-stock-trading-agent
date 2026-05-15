@@ -2,68 +2,6 @@ import { AgentWorkflow, AgentWorkflowStep, AgentWorkflowEvent } from "agents/wor
 import { TradingAgent } from "./index";
 import { sendTelegramMessage } from "./notifications";
 
-export class TradingWorkflow extends AgentWorkflow<any, { amount: number }> {
-  async run(event: AgentWorkflowEvent<{ amount: number }>, step: AgentWorkflowStep) {
-    const agent = this.agent as TradingAgent;
-    const env = this.env as any;
-    const { amount } = event.payload;
-
-    // 1. Analyze Market
-    const opportunities = await step.do("analyze-market", async () => {
-      return await agent.findOpportunities({
-        min_fall_pct: -2.0,
-        min_rsi: 50
-      });
-    });
-
-    if (!opportunities || opportunities.length === 0) {
-      console.log("No opportunities found today.");
-      return;
-    }
-
-    // 2. Notify via Telegram
-    await step.do("notify-user", async () => {
-      const loginStatus = await agent.checkKiteLogin();
-      
-      let message = `🚀 *Stock Alert*
-Found ${opportunities.length} buy opportunities.
-Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi})\n\n`;
-
-      if (loginStatus.status === "disconnected") {
-        message += `⚠️ *Action Required*: Your Kite session has expired.\n1. [Login to Kite](${loginStatus.loginUrl})\n2. After logging in, click the button below.\n\n`;
-      }
-
-      message += `[Approve & Buy ₹${amount}](https://cf-stock-trading-agent.durgadas.in/approve?workflowId=${this.workflowId})`;
-
-      await sendTelegramMessage(message, {
-        botToken: env.TELEGRAM_BOT_TOKEN,
-        chatId: env.TELEGRAM_CHAT_ID
-      });
-    });
-
-    // 3. Wait for Approval (Human-in-the-loop)
-    const approval = await this.waitForApproval(step, {
-      timeout: "1 hour",
-      stepName: "User Approval"
-    }) as { approved: boolean };
-
-    if (!approval.approved) {
-      console.log("Trade rejected by user.");
-      return;
-    }
-
-    // 4. Place Orders
-    const results = await step.do("place-orders", async () => {
-      return await agent.executeOrders({
-        amount: amount,
-        opportunities: opportunities
-      });
-    });
-
-    return results;
-  }
-}
-
 export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
   async run(event: AgentWorkflowEvent<{}>, step: AgentWorkflowStep) {
     const agent = this.agent as TradingAgent;
