@@ -17,7 +17,7 @@ export interface Env {
 }
 
 export class TradingAgent extends Agent<Env> {
-  private kite: KiteConnect | null = null;
+  private kite: any = null;
 
   async onStart() {
     // Connect to the MCP server on startup
@@ -343,7 +343,7 @@ export default {
       // Kite callbacks are authenticated by the request_token itself
       const requestToken = url.searchParams.get("request_token");
       if (!requestToken) return new Response("Missing request_token", { status: 400 });
-      const agent = await env.TRADING_AGENT.get(env.TRADING_AGENT.idFromName("default"));
+      const agent: any = await env.TRADING_AGENT.get(env.TRADING_AGENT.idFromName("default"));
       const result = await agent.setKiteRequestToken(requestToken);
       return new Response(`🚀 Kite Session Active for ${result.user}!`, { headers: { "Content-Type": "text/plain" } });
     }

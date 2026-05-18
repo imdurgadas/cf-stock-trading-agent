@@ -2,9 +2,9 @@ import { AgentWorkflow, AgentWorkflowStep, AgentWorkflowEvent } from "agents/wor
 import { TradingAgent } from "./index";
 import { sendTelegramMessage } from "./notifications";
 
-export class TradingWorkflow extends AgentWorkflow<any, { amount: number }> {
-  async run(event: AgentWorkflowEvent<{ amount: number }>, step: AgentWorkflowStep) {
-    const agent = this.agent as TradingAgent;
+export class TradingWorkflow extends AgentWorkflow<any, { amount: number, mock?: boolean }> {
+  async run(event: AgentWorkflowEvent<{ amount: number, mock?: boolean }>, step: AgentWorkflowStep) {
+    const agent = (this as any).agent;
     const env = this.env as any;
     const { amount } = event.payload;
 
@@ -82,7 +82,7 @@ Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi.toFixed(1)})\n
 
     // 5. Fetch the interactive amount set by the bot
     const finalAmount = await step.do("get-final-amount", async () => {
-      return await agent.ctx.storage.get<number>("pending_amount") || amount;
+      return (await agent.ctx.storage.get("pending_amount")) as number || amount;
     });
 
     // 6. Place Orders
@@ -99,7 +99,7 @@ Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi.toFixed(1)})\n
 
 export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
   async run(event: AgentWorkflowEvent<{}>, step: AgentWorkflowStep) {
-    const agent = this.agent as TradingAgent;
+    const agent = (this as any).agent;
     const env = this.env as any;
 
     // 1. Fetch Watchlist Analysis
