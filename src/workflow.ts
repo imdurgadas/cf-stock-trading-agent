@@ -56,9 +56,9 @@ Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi.toFixed(1)})\n
 
       if (loginStatus.status === "disconnected") {
         const loginUrl = `${env.BASE_URL}/kite-login?token=${env.AUTH_TOKEN}`;
-        message += `⚠️ *Action Required*: Your Kite session has expired.\n1. [Login to Kite](${loginUrl})\n2. After logging in, type "trade <amount>" below.\n\n`;
+        message += `⚠️ *Action Required*: Your Kite session has expired.\n1. [Login to Kite](${loginUrl})\n2. After logging in, type "kite_trade <amount>" below.\n\n`;
       } else {
-        message += `Reply with \`trade <amount>\` (e.g., \`trade 1000\`) to continue.`;
+        message += `Reply with \`kite_trade <amount>\` (e.g., \`kite_trade 1000\`) to continue.`;
       }
 
       await agent.logFromWorkflow("Calling sendTelegramMessage...");
@@ -178,7 +178,7 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
         message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
 
         if (buyOpportunities.length > 0) {
-          message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use \`trade <symbol> <amount>\` to place selective orders.`;
+          message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use \`kite_trade <symbol> <amount>\` to place selective orders.`;
         } else if (strongRising.length > 0) {
           message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
         } else {

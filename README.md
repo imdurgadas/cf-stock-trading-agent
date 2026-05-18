@@ -105,39 +105,39 @@ To display a command suggestion menu when you type `/` in the chat, register the
 3. Choose your trading bot from the list.
 4. Copy and paste the list below:
    ```text
-    login - Generate secure Zerodha Kite Connect login link
-    holdings - View active NSE equity and ETF holdings
+    kite_login - Generate secure Zerodha Kite Connect login link (45 mins TTL)
+    kite_holdings - View active NSE equity and ETF holdings
+    kite_analyze - Run stock-mcp technical analysis on NSE holdings
+    kite_trade - View pending trade scan or trigger custom orders
     mf - View mutual fund holdings with live NAVs
-    analyze - Run automated ETF watchlist technical analysis (No Kite session required)
-    analyze_it - Run IT sector watchlist technical analysis
-    analyze_bank - Run banking sector watchlist technical analysis
-    analyze_energy - Run energy sector watchlist technical analysis
-    analyze_potential - Run high-growth structural stocks watchlist analysis
-    analyze_holdings - Run stock-mcp technical analysis on NSE holdings (Kite session required)
-    analyze_mf - Run mutual fund portfolio health analysis (Falls back to high-conviction watchlist if empty)
-    search_mf - Search AMFI mutual fund database for direct growth plans
-    trade - View pending trade scan or trigger custom orders
+    mf_analyze - Run mutual fund portfolio risk & returns analysis
+    mf_search - Search AMFI master database for Direct Growth schemes
+    etf_analyze - Run automated ETF watchlist technical analysis
+    it_analyze - Run IT sector watchlist technical analysis
+    bank_analyze - Run banking sector watchlist technical analysis
+    energy_analyze - Run energy sector watchlist technical analysis
+    potential_analyze - Run high-growth structural stocks watchlist analysis
     ```
 5. Send. The menu will immediately populate in your chat window.
 
 ### 2. Available Commands Reference
 
-The bot supports natural language command patterns, alongside standard slash commands.
+The bot supports resilient command patterns, allowing you to trigger them with or without a leading slash (`/`), alongside standard friendly text patterns.
 
-| Live Command | Short/Alternative | Demo (Mock Data) | Description |
+| Command | Resilient Aliases | Demo (Mock Data) | Description |
 | :--- | :--- | :--- | :--- |
-| `kite login` | `login` / `/login` | N/A | Generates a 10-minute secure authorization link to Zerodha Kite. |
-| `get kite holdings` | `holdings` / `/holdings` | `mock holdings` | Fetches active equity/ETF holdings, formats P&L status, and prints totals. |
-| `get mutual fund holdings` | `mf` / `mf holdings` / `/mf` | `mock mf` | Fetches active mutual fund holdings, average costs, current NAVs, and returns. |
-| `analyze` | `do analysis` / `/analyze` / `watchlist analysis` | N/A | **Automated Watchlist Scan**: Runs the weekly/scheduled `WatchlistAnalysisWorkflow`. Limited **only** to the default **ETF** watchlist to minimize Telegram message noise. **No Kite session required!** |
-| `analyze_it` | `analyze it` / `/analyze_it` | N/A | **IT Watchlist Scan**: Evaluates the full technical indicators of the active IT sector watchlist on-demand. |
-| `analyze_bank` | `analyze bank` / `/analyze_bank` | N/A | **Banking Watchlist Scan**: Evaluates the full technical indicators of the active private and PSU banking watchlist on-demand. |
-| `analyze_energy` | `analyze energy` / `/analyze_energy` | N/A | **Energy Watchlist Scan**: Evaluates the full technical indicators of the active utility/energy sector watchlist on-demand. |
-| `analyze_potential` | `analyze potential` / `/analyze_potential` | N/A | **High-Growth Scan**: Evaluates active under-the-radar structural growth stocks (CDSL, RVNL, CDSL, CDSL, CDSL, CDSL) on-demand. |
-| `analyze_kite_holdings` | `analyze holdings` / `/analyze_holdings` / `/analyze_kite_holdings` | `mock analyze` | **Equity Holdings Scan**: Extracts holding symbols, maps them to NSE (`.NS`), and runs stock-mcp High-Conviction scans. |
-| `analyze_mf` | `analyze mf` / `/analyze_mf` / `/mf_analysis` | `mock analyze mf` | **MF Health Card**: Evaluates mutual fund returns, top/under-performers, and asset allocation percentage weights. **Falls back to scanning the high-conviction 9-fund Mutual Fund Watchlist automatically if portfolio holdings are empty!** |
-| `search_mf <query>` | `search mf` / `/search_mf` | N/A | **AMFI Search Engine**: Searches the 17,000+ active mutual fund registry from AMFI in real-time, matching wildcards (e.g. `search_mf Mirae` or `search_mf Quant`) and prioritizing direct growth schemes. |
-| `trade <amount>` | `trade <symbol> <amount>` | N/A | Starts an order flow scan or targets a specific stock to buy (e.g. `trade INFY 5000`). |
+| `/kite_login` | `kite_login` / `login` | N/A | Generates a secure authorization link to Zerodha Kite. **Session lasts 45 minutes.** |
+| `/kite_holdings` | `kite_holdings` / `holdings` | `mock holdings` | Fetches active equity/ETF holdings, formats P&L status, and prints totals. |
+| `/kite_analyze` | `kite_analyze` / `stock_analyze` / `analyze_holdings` | `mock analyze` | **Equity Holdings Scan**: Extracts active equity symbols, maps to NSE (`.NS`), and runs stock-mcp High-Conviction scans. |
+| `/kite_trade <amount>` | `kite_trade <symbol> <amount>` / `trade <amount>` | N/A | Starts an order flow scan or targets a specific stock to buy (e.g. `kite_trade INFY 5000`). |
+| `/mf` | `mf` / `mf holdings` / `mutual fund holdings` | `mock mf` | Fetches active mutual fund holdings, average costs, current NAVs, and returns. |
+| `/mf_analyze` | `mf_analyze` / `analyze mf` / `mf_analysis` | `mock analyze mf` | **MF Health Card**: Evaluates mutual fund returns, top/under-performers, and asset allocation. **Falls back to high-conviction 9-fund watchlist scan if empty!** |
+| `/mf_search <query>` | `mf_search <query>` / `search_mf <query>` | N/A | **AMFI Search Engine**: Searches the 17,000+ active mutual fund registry from AMFI in real-time, matching wildcards (e.g. `mf_search Mirae`) and prioritizing direct growth schemes. |
+| `/etf_analyze` | `etf_analyze` / `analyze` / `do analysis` | N/A | **ETF Watchlist Scan**: Runs the technical analysis on the default **ETF** watchlist on-demand. **No Kite session required!** |
+| `/it_analyze` | `it_analyze` / `analyze it` | N/A | **IT Watchlist Scan**: Evaluates the full technical indicators of the active IT sector watchlist on-demand. |
+| `/bank_analyze` | `bank_analyze` / `analyze bank` | N/A | **Banking Watchlist Scan**: Evaluates the full technical indicators of the active private and PSU banking watchlist on-demand. |
+| `/energy_analyze` | `energy_analyze` / `analyze energy` | N/A | **Energy Watchlist Scan**: Evaluates the full technical indicators of the active utility/energy sector watchlist on-demand. |
+| `/potential_analyze` | `potential_analyze` / `analyze potential` | N/A | **High-Growth Scan**: Evaluates active under-the-radar structural growth stocks (CDSL, RVNL, etc.) on-demand. |
 
 ---
 

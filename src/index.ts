@@ -31,7 +31,7 @@ export class TradingAgent extends Agent<Env> {
       // Check for memory-cached expiry
       const expiry = await this.ctx.storage.get<number>("kite_token_expiry");
       if (expiry && Date.now() > expiry) {
-        console.warn("[Agent] Kite session expired (10-minute TTL).");
+        console.warn("[Agent] Kite session expired (45-minute TTL).");
         this.kite = null;
         await this.ctx.storage.delete("kite_access_token");
         await this.ctx.storage.delete("kite_token_expiry");
@@ -44,9 +44,9 @@ export class TradingAgent extends Agent<Env> {
     const accessToken = await this.ctx.storage.get<string>("kite_access_token");
     const expiry = await this.ctx.storage.get<number>("kite_token_expiry");
 
-    // Enforce 10-minute expiry
+    // Enforce 45-minute expiry
     if (accessToken && expiry && Date.now() > expiry) {
-      console.warn("[Agent] Kite session expired (10-minute TTL). Cleaning up...");
+      console.warn("[Agent] Kite session expired (45-minute TTL). Cleaning up...");
       await this.ctx.storage.delete("kite_access_token");
       await this.ctx.storage.delete("kite_token_expiry");
       return new (KiteConnect as any)({ api_key: this.env.KITE_API_KEY });
@@ -169,8 +169,8 @@ export class TradingAgent extends Agent<Env> {
     try {
       const response = await kite.generateSession(requestToken, this.env.KITE_API_SECRET);
       
-      // Set 10-minute expiry
-      const expiry = Date.now() + (10 * 60 * 1000);
+      // Set 45-minute expiry
+      const expiry = Date.now() + (45 * 60 * 1000);
       await this.ctx.storage.put("kite_access_token", response.access_token);
       await this.ctx.storage.put("kite_token_expiry", expiry);
       
@@ -292,24 +292,27 @@ export class TradingAgent extends Agent<Env> {
 
   @callable()
   async handleTelegramUpdate(update: any) {
-    const text = update.message?.text?.toLowerCase()?.trim();
+    const rawText = update.message?.text?.toLowerCase()?.trim();
     const chatId = update.message?.chat?.id;
 
-    if (!text || String(chatId) !== String(this.env.TELEGRAM_CHAT_ID)) return;
+    if (!rawText || String(chatId) !== String(this.env.TELEGRAM_CHAT_ID)) return;
+
+    // Strip leading slash if present to make command routing resilient and clean
+    const text = rawText.startsWith("/") ? rawText.slice(1) : rawText;
 
     // 1. Command: Kite Login
-    if (text === "kite login" || text === "login" || text === "/login") {
+    if (text === "kite_login" || text === "kite login" || text === "login") {
       const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
-      await this.sendBotMessage(`🔗 *Kite Login*: [Click here to login and authenticate](${loginUrl})\n\n💡 _Note: Sessions expire in 10 minutes for security._`);
+      await this.sendBotMessage(`🔗 *Kite Login*: [Click here to login and authenticate](${loginUrl})\n\n💡 _Note: Sessions expire in 45 minutes for security._`);
       return;
     }
 
     // 2. Command: Get Kite Equity Holdings (Live or Mock)
     if (
+      text === "kite_holdings" ||
       text === "get kite holdings" ||
       text === "kite holdings" ||
       text === "holdings" ||
-      text === "/holdings" ||
       text === "mock holdings"
     ) {
       const useMock = text.includes("mock");
@@ -319,12 +322,11 @@ export class TradingAgent extends Agent<Env> {
 
     // 3. Command: Get Mutual Fund Holdings (Live or Mock)
     if (
+      text === "mf" ||
       text === "get mutual fund holdings" ||
       text === "mutual fund holdings" ||
       text === "get mf holdings" ||
       text === "mf holdings" ||
-      text === "mf" ||
-      text === "/mf" ||
       text === "mock mf"
     ) {
       const useMock = text.includes("mock");
@@ -332,44 +334,44 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
-    // 4. Command: Do Watchlist Technical Analysis (No Kite Session Required!)
+    // 4. Command: Do ETF Watchlist Technical Analysis (No Kite Session Required!)
     if (
+      text === "etf_analyze" ||
       text === "do analysis" ||
       text === "analyze" ||
-      text === "/analyze" ||
       text === "analyze watchlists" ||
       text === "watchlist analysis"
     ) {
-      await this.sendBotMessage("🔍 *Watchlist Analysis Started*\nTriggering sector watchlists technical analysis scans...");
+      await this.sendBotMessage("🔍 *ETF Watchlist Technical Scan Started*...");
       await this.startWatchlistAnalysis();
       return;
     }
 
     // New Watchlist Sector Commands
-    if (text === "analyze it" || text === "analyze_it" || text === "/analyze_it") {
+    if (text === "it_analyze" || text === "analyze it" || text === "analyze_it") {
       await this.handleSectorAnalysis("IT");
       return;
     }
-    if (text === "analyze bank" || text === "analyze_bank" || text === "/analyze_bank") {
+    if (text === "bank_analyze" || text === "analyze bank" || text === "analyze_bank") {
       await this.handleSectorAnalysis("BANK");
       return;
     }
-    if (text === "analyze energy" || text === "analyze_energy" || text === "/analyze_energy") {
+    if (text === "energy_analyze" || text === "analyze energy" || text === "analyze_energy") {
       await this.handleSectorAnalysis("ENERGY");
       return;
     }
-    if (text === "analyze potential" || text === "analyze_potential" || text === "/analyze_potential") {
+    if (text === "potential_analyze" || text === "analyze potential" || text === "analyze_potential") {
       await this.handleSectorAnalysis("POTENTIAL");
       return;
     }
 
     // 5. Command: Do Technical Analysis of Kite Holdings (Kite Session Required)
     if (
+      text === "kite_analyze" ||
+      text === "stock_analyze" ||
       text === "analyze holdings" ||
       text === "analyze_holdings" ||
       text === "analyze_kite_holdings" ||
-      text === "/analyze_holdings" ||
-      text === "/analyze_kite_holdings" ||
       text === "mock analyze holdings" ||
       text === "mock analyze"
     ) {
@@ -380,10 +382,10 @@ export class TradingAgent extends Agent<Env> {
 
     // 6. Command: Do Mutual Fund Portfolio Diversification Analysis (Live or Mock)
     if (
+      text === "mf_analyze" ||
       text === "analyze mf" ||
       text === "analyze_mf" ||
-      text === "/analyze_mf" ||
-      text === "/mf_analysis" ||
+      text === "mf_analysis" ||
       text === "mock analyze mf"
     ) {
       const useMock = text.includes("mock");
@@ -392,23 +394,23 @@ export class TradingAgent extends Agent<Env> {
     }
 
     // New AMFI Wildcard Mutual Fund Search Command
-    if (text.startsWith("search mf ") || text.startsWith("search_mf ") || text.startsWith("/search_mf ")) {
-      const query = text.replace(/^(\/)?search(_)?mf\s+/, "").trim();
+    if (text.startsWith("mf_search ") || text.startsWith("search mf ") || text.startsWith("search_mf ")) {
+      const query = text.replace(/^(mf_search|search_mf|search mf)\s+/, "").trim();
       if (!query) {
-        await this.sendBotMessage("⚠️ Please provide a query, e.g. `/search_mf Mirae` or `/search_mf Parag`.");
+        await this.sendBotMessage("⚠️ Please provide a query, e.g. `mf_search Mirae` or `mf_search Parag`.");
         return;
       }
       await this.handleSearchMF(query);
       return;
     }
 
-    // 5. Handle "trade <symbol> <amount>" or "trade <amount>"
-    const tradeSymbolMatch = text.match(/^trade\s+([a-zA-Z0-9\.\-_]+)\s+(\d+)$/);
-    const tradeAmountMatch = text.match(/^trade\s+(\d+)$/);
+    // 5. Handle "kite_trade <symbol> <amount>" or "kite_trade <amount>" (also matches legacy "trade")
+    const tradeSymbolMatch = text.match(/^(kite_trade|trade)\s+([a-zA-Z0-9\.\-_]+)\s+(\d+)$/);
+    const tradeAmountMatch = text.match(/^(kite_trade|trade)\s+(\d+)$/);
 
     if (tradeSymbolMatch) {
-      const symbol = tradeSymbolMatch[1].toUpperCase();
-      const amount = parseInt(tradeSymbolMatch[2]);
+      const symbol = tradeSymbolMatch[2].toUpperCase();
+      const amount = parseInt(tradeSymbolMatch[3]);
       
       await this.ctx.storage.put("pending_amount", amount);
       await this.ctx.storage.put("pending_symbol", symbol);
@@ -423,7 +425,7 @@ export class TradingAgent extends Agent<Env> {
 
       const opportunities = await this.ctx.storage.get<any[]>("last_opportunities");
       if (!opportunities || opportunities.length === 0) {
-        await this.sendBotMessage("No pending opportunities found. Please wait for the next scan. To trade a specific stock, use `trade <symbol> <amount>`.");
+        await this.sendBotMessage("No pending opportunities found. Please wait for the next scan. To trade a specific stock, use `kite_trade <symbol> <amount>`.");
         return;
       }
 
@@ -439,7 +441,7 @@ export class TradingAgent extends Agent<Env> {
       const workflowId = await this.ctx.storage.get<string>("pending_workflow_id");
 
       if (!amount || !workflowId) {
-        await this.sendBotMessage("Nothing to confirm. Use `trade <amount>` or `trade <symbol> <amount>` first.");
+        await this.sendBotMessage("Nothing to confirm. Use `kite_trade <amount>` or `kite_trade <symbol> <amount>` first.");
         return;
       }
 
@@ -536,23 +538,16 @@ export class TradingAgent extends Agent<Env> {
         let fundHouse = "Unknown Fund House";
 
         if (cleanName.length > 0) {
-          try {
-            const searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanName)}`);
-            if (searchRes.ok) {
-              const searchJson = await searchRes.json() as any[];
-              if (searchJson && searchJson.length > 0) {
-                // Find the best match containing Direct and Growth
-                let bestMatch = searchJson[0];
-                for (const match of searchJson) {
-                  const matchLower = match.schemeName.toLowerCase();
-                  if (matchLower.includes("direct") && matchLower.includes("growth")) {
-                    bestMatch = match;
-                    break;
-                  }
-                }
-                
-                schemeCode = bestMatch.schemeCode;
-                schemeName = bestMatch.schemeName;
+          const isISIN = cleanName.startsWith("INF") && cleanName.length === 12;
+          if (isISIN) {
+            try {
+              console.log(`[Enrich] Resolving ISIN ${cleanName} via Stock MCP...`);
+              const searchResults = await this.searchMutualFundsMCP(cleanName);
+              if (searchResults && searchResults.length > 0) {
+                const bestMatch = searchResults[0];
+                schemeCode = bestMatch.scheme_code;
+                schemeName = bestMatch.scheme_name;
+                console.log(`[Enrich] Resolved ISIN ${cleanName} to Scheme Code ${schemeCode} ("${schemeName}")`);
 
                 // Fetch details for fund house
                 const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
@@ -563,9 +558,44 @@ export class TradingAgent extends Agent<Env> {
                   }
                 }
               }
+            } catch (err: any) {
+              console.error(`[Enrich] Failed to resolve ISIN ${cleanName} via MCP:`, err.message);
             }
-          } catch (e) {
-            console.error(`Error enriching MF holding ${queryName}:`, e);
+          }
+
+          // Fallback if ISIN resolution failed or wasn't an ISIN
+          if (!schemeCode) {
+            try {
+              const searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanName)}`);
+              if (searchRes.ok) {
+                const searchJson = await searchRes.json() as any[];
+                if (searchJson && searchJson.length > 0) {
+                  // Find the best match containing Direct and Growth
+                  let bestMatch = searchJson[0];
+                  for (const match of searchJson) {
+                    const matchLower = match.schemeName.toLowerCase();
+                    if (matchLower.includes("direct") && matchLower.includes("growth")) {
+                      bestMatch = match;
+                      break;
+                    }
+                  }
+                  
+                  schemeCode = bestMatch.schemeCode;
+                  schemeName = bestMatch.schemeName;
+
+                  // Fetch details for fund house
+                  const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
+                  if (detailsRes.ok) {
+                    const detailsJson = await detailsRes.json() as any;
+                    if (detailsJson.meta) {
+                      fundHouse = detailsJson.meta.fund_house || "Unknown Fund House";
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.error(`Error enriching MF holding ${queryName}:`, e);
+            }
           }
         }
 
