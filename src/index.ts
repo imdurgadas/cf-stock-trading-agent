@@ -3,6 +3,24 @@ import { TradingWorkflow, WatchlistAnalysisWorkflow } from "./workflow";
 import * as KitePkg from "kiteconnect";
 const KiteConnect = (KitePkg as any).KiteConnect || (KitePkg as any).default?.KiteConnect || KitePkg;
 
+// Helper to escape special Markdown characters (*, _, `) in dynamic text fields to prevent Telegram parsing errors
+function escapeMarkdown(text: any): string {
+  if (text === undefined || text === null) return "N/A";
+  return String(text)
+    .replace(/_/g, "\\_")
+    .replace(/\*/g, "\\*")
+    .replace(/`/g, "\\` ");
+}
+
+// Helper to escape special HTML characters (<, >, &) in dynamic text fields to prevent Telegram HTML parsing errors
+function escapeHtml(text: any): string {
+  if (text === undefined || text === null) return "N/A";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 export interface Env {
   TRADING_AGENT: DurableObjectNamespace<TradingAgent>;
   TRADING_WORKFLOW: Workflow;
@@ -658,7 +676,7 @@ export class TradingAgent extends Agent<Env> {
     // Enrich holdings with name, scheme code, and fund house
     const enriched = await this.enrichMFHoldings(holdings);
 
-    let message = `🌾 *Mutual Fund Holdings*\n`;
+    let message = `🌾 <b>Mutual Fund Holdings</b>\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
     let totalInvested = 0;
@@ -681,12 +699,16 @@ export class TradingAgent extends Agent<Env> {
       const trend = pnl >= 0 ? "🟢" : "🔴";
       const sign = pnl >= 0 ? "+" : "";
 
-      message += `• *${h.name}*\n`;
-      message += `  House: _${h.fundHouse}_ | Scheme: \`${h.schemeCode}\`\n`;
+      const fundName = escapeHtml(h.name);
+      const fundHouse = escapeHtml(h.fundHouse);
+      const schemeCode = escapeHtml(h.schemeCode);
+
+      message += `• <b>${fundName}</b>\n`;
+      message += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
       message += `  ISIN: ${h.isin || "N/A"} | Units: ${qty.toFixed(3)}\n`;
       message += `  Avg NAV: ₹${avg.toFixed(4)} | Last NAV: ₹${ltp.toFixed(4)}\n`;
       message += `  Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-      message += `  P&L: *${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+      message += `  P&L: <b>${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${pnlPct.toFixed(2)}%)\n\n`;
     }
 
     const totalPnL = totalCurrent - totalInvested;
@@ -695,15 +717,15 @@ export class TradingAgent extends Agent<Env> {
     const totalSign = totalPnL >= 0 ? "+" : "";
 
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💰 *Total MF Invested*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📈 *Current MF Value*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📊 *Total MF P&L*: *${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${totalSign}${totalPnLPct.toFixed(2)}%)\n`;
+    message += `💰 <b>Total MF Invested</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📈 <b>Current MF Value</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📊 <b>Total MF P&L</b>: <b>${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${totalSign}${totalPnLPct.toFixed(2)}%)\n`;
 
     if (useMock) {
-      message += `\n⚠️ _This is a Mock Account demo._`;
+      message += `\n⚠️ <i>This is a Mock Account demo.</i>`;
     }
 
-    await this.sendBotMessage(message);
+    await this.sendBotHtmlMessage(message);
   }
 
   private async handleAnalyzeHoldings(useMock: boolean) {
@@ -748,7 +770,7 @@ export class TradingAgent extends Agent<Env> {
         return;
       }
 
-      let message = `🔍 *Holdings Technical Analysis*\n`;
+      let message = `🔍 <b>Holdings Technical Analysis</b>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
       const buyOpportunities: string[] = [];
@@ -760,44 +782,54 @@ export class TradingAgent extends Agent<Env> {
         const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
         const isDip = stock.fall_pct <= -2;
 
+        const symbol = escapeHtml(stock.symbol);
         if (isBullish) {
           if (isDip) {
-            buyOpportunities.push(stock.symbol);
+            buyOpportunities.push(symbol);
           } else {
-            strongRising.push(stock.symbol);
+            strongRising.push(symbol);
           }
         } else {
-          bearishWeak.push(stock.symbol);
+          bearishWeak.push(symbol);
         }
 
-        message += `*${stock.symbol}* ${trend}\n`;
-        message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
-        message += `• RSI: ${stock.rsi?.toFixed(1) ?? "N/A"} | ADX: ${stock.adx?.toFixed(1) ?? "N/A"}${stock.adx >= 25 ? " 🔥" : ""}\n`;
+        const ltp = escapeHtml(stock.ltp);
+        const fallPctSign = stock.fall_pct >= 0 ? "+" : "";
+        const fallPctVal = stock.fall_pct.toFixed(2);
+        const rsiVal = stock.rsi?.toFixed(1) ?? "N/A";
+        const adxVal = stock.adx?.toFixed(1) ?? "N/A";
+        const adxFire = stock.adx >= 25 ? " 🔥" : "";
+        const recommend = escapeHtml(stock.recommendation);
+        const comment = escapeHtml(stock.comment);
+
+        message += `<b>${symbol}</b> ${trend}\n`;
+        message += `• Price: ₹${ltp} (${fallPctSign}${fallPctVal}%)\n`;
+        message += `• RSI: ${rsiVal} | ADX: ${adxVal}${adxFire}\n`;
         message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
         message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
         message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
         message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
-        message += `• Recommendation: *${stock.recommendation}*\n`;
-        message += `• Analysis: _${stock.comment}_\n\n`;
+        message += `• Recommendation: <b>${recommend}</b>\n`;
+        message += `• Analysis: <i>"${comment}"</i>\n\n`;
       }
 
       message += `━━━━━━━━━━━━━━━\n`;
-      message += `📈 *Holdings Summary*:\n`;
-      message += `• *Buy Opportunities (RSI Dip)* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-      message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-      message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
+      message += `📈 <b>Holdings Summary</b>:\n`;
+      message += `• <b>Buy Opportunities (RSI Dip)</b> (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
+      message += `• <b>Strong & Rising</b> (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
+      message += `• <b>Bearish/Weak</b> (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n\n`;
 
       if (buyOpportunities.length > 0) {
-        message += `🚀 *Action*: Your holdings ${buyOpportunities.join(", ")} are currently in a high-conviction buy/dip zone! You can consider accumulating more.`;
+        message += `🚀 <b>Action</b>: Your holdings ${buyOpportunities.map(s => `<b>${s}</b>`).join(", ")} are currently in a high-conviction buy/dip zone! You can consider accumulating more.`;
       } else {
-        message += `💎 *Action*: No high-conviction dip entries for your holdings right now. Let them ride!`;
+        message += `💎 <b>Action</b>: No high-conviction dip entries for your holdings right now. Let them ride!`;
       }
 
       if (useMock) {
-        message += `\n\n⚠️ _This analysis is based on mock holdings._`;
+        message += `\n\n⚠️ <i>This analysis is based on mock holdings.</i>`;
       }
 
-      await this.sendBotMessage(message);
+      await this.sendBotHtmlMessage(message);
     } catch (err: any) {
       console.error("Holdings analysis failed:", err.message);
       await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
@@ -826,7 +858,7 @@ export class TradingAgent extends Agent<Env> {
     await this.sendBotMessage("🔍 *Mutual Fund Watchlist Deep Technical Scan Started*...\nQuerying our Technical Analysis MCP Server...");
     try {
       const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
-      let message = `🌾 *Mutual Fund Watchlist Deep Technical Scan*\n`;
+      let message = `🌾 <b>Mutual Fund Watchlist Deep Technical Scan</b>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
       for (const mcp of watchlistResults) {
@@ -835,24 +867,30 @@ export class TradingAgent extends Agent<Env> {
           : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
           : "🔴";
 
-        message += `• *${mcp?.meta?.scheme_name || "Unknown Fund"}*\n`;
-        message += `  House: _${mcp?.meta?.fund_house || "N/A"}_ | Scheme: \`${mcp?.meta?.scheme_code}\`\n`;
-        message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}* _(Ideal: >12%)_\n`;
-        message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* _(Ideal: >1.0)_ | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}* _(Ideal: >1.5)_\n`;
-        message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}* _(Ideal: <15% for stability)_\n`;
-        message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
-        message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
+        const schemeName = escapeHtml(mcp?.meta?.scheme_name);
+        const fundHouse = escapeHtml(mcp?.meta?.fund_house);
+        const schemeCode = escapeHtml(mcp?.meta?.scheme_code);
+        const grade = escapeHtml(mcp?.evaluation?.grade);
+        const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
+
+        message += `• <b>${schemeName}</b>\n`;
+        message += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
+        message += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
+        message += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
+        message += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
+        message += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
+        message += `  Comment: <i>"${comment}"</i>\n\n`;
       }
 
       message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      message += `📊 *Indicator Glossary (Easy Words)*:\n`;
-      message += `• *CAGR*: The average annual growth rate. Higher means your money grows faster. Ideal is >12%.\n`;
-      message += `• *Sharpe Ratio*: Measures return earned per unit of risk. *Ideal >1.0*. Higher means the fund manager is smart at taking calculated risks.\n`;
-      message += `• *Sortino Ratio*: Measures return against *only bad/downside* drops. *Ideal >1.5*. Higher means the fund protects you best during market crashes.\n`;
-      message += `• *Volatility*: Fluctuation scale. *Ideal <15%*. Lower means a smoother, less stressful investment ride.\n\n`;
-      message += `💡 _Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth._`;
+      message += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
+      message += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
+      message += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
+      message += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
+      message += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.\n\n`;
+      message += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>`;
       
-      await this.sendBotMessage(message);
+      await this.sendBotHtmlMessage(message);
     } catch (err: any) {
       console.error("Failed to analyze MF watchlist:", err);
       await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
@@ -909,7 +947,7 @@ export class TradingAgent extends Agent<Env> {
     let underPerformer = { name: "", symbol: "", fundHouse: "", schemeCode: "", pnlPct: Infinity, pnl: 0 };
     const allocationData: { name: string; value: number; pct: number }[] = [];
 
-    let message = `🌾 *Mutual Fund Portfolio Health Card*\n`;
+    let message = `🌾 <b>Mutual Fund Portfolio Health Card</b>\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
     for (const h of analyzed) {
@@ -942,13 +980,19 @@ export class TradingAgent extends Agent<Env> {
         : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
         : "🔴";
 
-      message += `• *${h.name}*\n`;
-      message += `  House: _${h.fundHouse}_ | Scheme: \`${h.schemeCode}\`\n`;
-      message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}* _(Ideal: >12%)_\n`;
-      message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* _(Ideal: >1.0)_ | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}* _(Ideal: >1.5)_\n`;
-      message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}* _(Ideal: <15% for stability)_\n`;
-      message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
-      message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
+      const fundName = escapeHtml(h.name);
+      const fundHouse = escapeHtml(h.fundHouse);
+      const schemeCode = escapeHtml(h.schemeCode);
+      const grade = escapeHtml(mcp?.evaluation?.grade);
+      const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
+
+      message += `• <b>${fundName}</b>\n`;
+      message += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
+      message += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
+      message += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
+      message += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
+      message += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
+      message += `  Comment: <i>"${comment}"</i>\n\n`;
     }
 
     // Calculate asset allocation weights
@@ -965,57 +1009,64 @@ export class TradingAgent extends Agent<Env> {
     const sign = totalPnL >= 0 ? "+" : "";
 
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💰 *Total Wealth*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `💰 *Invested Value*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📈 *Net Returns*: *${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
+    message += `💰 <b>Total Wealth</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `💰 <b>Invested Value</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📈 <b>Net Returns</b>: <b>${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
 
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `🏆 *Top Performer*:\n`;
+    message += `🏆 <b>Top Performer</b>:\n`;
     if (topPerformer.name) {
       const topSign = topPerformer.pnl >= 0 ? "+" : "";
-      message += `• *${topPerformer.name}*\n`;
-      message += `  House: _${topPerformer.fundHouse}_ | Scheme: \`${topPerformer.schemeCode}\`\n`;
-      message += `  PnL: *${topSign}${topPerformer.pnlPct.toFixed(2)}%* (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+      const topName = escapeHtml(topPerformer.name);
+      const topHouse = escapeHtml(topPerformer.fundHouse);
+      const topCode = escapeHtml(topPerformer.schemeCode);
+      message += `• <b>${topName}</b>\n`;
+      message += `  House: <i>${topHouse}</i> | Scheme: <code>${topCode}</code>\n`;
+      message += `  PnL: <b>${topSign}${topPerformer.pnlPct.toFixed(2)}%</b> (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
     } else {
       message += `• N/A\n\n`;
     }
 
-    message += `📉 *Underperformer*:\n`;
+    message += `📉 <b>Underperformer</b>:\n`;
     if (underPerformer.name && underPerformer.symbol !== topPerformer.symbol) {
       const underSign = underPerformer.pnl >= 0 ? "+" : "";
-      message += `• *${underPerformer.name}*\n`;
-      message += `  House: _${underPerformer.fundHouse}_ | Scheme: \`${underPerformer.schemeCode}\`\n`;
-      message += `  PnL: *${underSign}${underPerformer.pnlPct.toFixed(2)}%* (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+      const underName = escapeHtml(underPerformer.name);
+      const underHouse = escapeHtml(underPerformer.fundHouse);
+      const underCode = escapeHtml(underPerformer.schemeCode);
+      message += `• <b>${underName}</b>\n`;
+      message += `  House: <i>${underHouse}</i> | Scheme: <code>${underCode}</code>\n`;
+      message += `  PnL: <b>${underSign}${underPerformer.pnlPct.toFixed(2)}%</b> (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
     } else {
       message += `• N/A (Single asset portfolio or identical performers)\n\n`;
     }
 
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `⚖️ *Asset Allocation & Diversification*:\n`;
+    message += `⚖️ <b>Asset Allocation & Diversification</b>:\n`;
     for (const item of allocationData) {
-      message += `• *${item.name}*: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
+      const itemName = escapeHtml(item.name);
+      message += `• <b>${itemName}</b>: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
     }
 
     if (totalPnLPct >= 10) {
-      message += `\n🚀 *Analysis*: Your Mutual Fund portfolio is performing exceptionally well with strong double-digit growth. Stay invested!`;
+      message += `\n🚀 <b>Analysis</b>: Your Mutual Fund portfolio is performing exceptionally well with strong double-digit growth. Stay invested!`;
     } else if (totalPnLPct >= 0) {
-      message += `\n💎 *Analysis*: Your portfolio has stable positive growth. Excellent asset distribution and long-term momentum.`;
+      message += `\n💎 <b>Analysis</b>: Your portfolio has stable positive growth. Excellent asset distribution and long-term momentum.`;
     } else {
-      message += `\n⚠️ *Analysis*: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
+      message += `\n⚠️ <b>Analysis</b>: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
     }
 
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `📊 *Indicator Glossary (Easy Words)*:\n`;
-    message += `• *CAGR*: The average annual growth rate. Higher means your money grows faster. Ideal is >12%.\n`;
-    message += `• *Sharpe Ratio*: Measures return earned per unit of risk. *Ideal >1.0*. Higher means the fund manager is smart at taking calculated risks.\n`;
-    message += `• *Sortino Ratio*: Measures return against *only bad/downside* drops. *Ideal >1.5*. Higher means the fund protects you best during market crashes.\n`;
-    message += `• *Volatility*: Fluctuation scale. *Ideal <15%*. Lower means a smoother, less stressful investment ride.`;
+    message += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
+    message += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
+    message += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
+    message += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
+    message += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.`;
 
     if (useMock) {
-      message += `\n\n⚠️ _This analysis is based on mock mutual fund holdings._`;
+      message += `\n\n⚠️ <i>This analysis is based on mock mutual fund holdings.</i>`;
     }
 
-    await this.sendBotMessage(message);
+    await this.sendBotHtmlMessage(message);
   }
 
   private getMockHoldings() {
@@ -1082,6 +1133,17 @@ export class TradingAgent extends Agent<Env> {
     console.log("[Telegram] Message sent successfully.");
   }
 
+  private async sendBotHtmlMessage(text: string) {
+    const { sendTelegramMessage } = await import("./notifications");
+    console.log("[Telegram] Sending HTML message:", text);
+    await sendTelegramMessage(text, {
+      botToken: this.env.TELEGRAM_BOT_TOKEN,
+      chatId: this.env.TELEGRAM_CHAT_ID,
+      parseMode: "HTML"
+    });
+    console.log("[Telegram] HTML Message sent successfully.");
+  }
+
   @callable()
   async handleKitePostback(data: any) {
     console.log("Kite Postback Received:", data);
@@ -1104,7 +1166,7 @@ export class TradingAgent extends Agent<Env> {
         return;
       }
 
-      let message = `📂 *Watchlist Sector: ${category}*\n`;
+      let message = `📂 <b>Watchlist Sector: ${escapeHtml(category)}</b>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
       const buyOpportunities: string[] = [];
       const strongRising: string[] = [];
@@ -1115,43 +1177,53 @@ export class TradingAgent extends Agent<Env> {
         const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
         const isDip = stock.fall_pct <= -2;
 
+        const symbol = escapeHtml(stock.symbol);
         if (isBullish) {
           if (isDip) {
-            buyOpportunities.push(stock.symbol);
+            buyOpportunities.push(symbol);
           } else {
-            strongRising.push(stock.symbol);
+            strongRising.push(symbol);
           }
         } else {
-          bearishWeak.push(stock.symbol);
+          bearishWeak.push(symbol);
         }
 
-        message += `*${stock.symbol}* ${trend}\n`;
-        message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
-        message += `• RSI: ${stock.rsi?.toFixed(1) ?? "N/A"} | ADX: ${stock.adx?.toFixed(1) ?? "N/A"}${stock.adx >= 25 ? " 🔥" : ""}\n`;
+        const ltp = escapeHtml(stock.ltp);
+        const fallPctSign = stock.fall_pct >= 0 ? "+" : "";
+        const fallPctVal = stock.fall_pct.toFixed(2);
+        const rsiVal = stock.rsi?.toFixed(1) ?? "N/A";
+        const adxVal = stock.adx?.toFixed(1) ?? "N/A";
+        const adxFire = stock.adx >= 25 ? " 🔥" : "";
+        const recommend = escapeHtml(stock.recommendation);
+        const comment = escapeHtml(stock.comment);
+
+        message += `<b>${symbol}</b> ${trend}\n`;
+        message += `• Price: ₹${ltp} (${fallPctSign}${fallPctVal}%)\n`;
+        message += `• RSI: ${rsiVal} | ADX: ${adxVal}${adxFire}\n`;
         message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
         message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
         message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
         message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
-        message += `• Recommendation: *${stock.recommendation}*\n`;
-        message += `• Analysis: _${stock.comment}_\n\n`;
+        message += `• Recommendation: <b>${recommend}</b>\n`;
+        message += `• Analysis: <i>"${comment}"</i>\n\n`;
       }
 
       // Add Sector Summary
       message += `━━━━━━━━━━━━━━━\n`;
-      message += `📈 *Sector Summary (${category})*:\n`;
-      message += `• *Buy Opportunities* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-      message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-      message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
+      message += `📈 <b>Sector Summary (${escapeHtml(category)})</b>:\n`;
+      message += `• <b>Buy Opportunities</b> (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
+      message += `• <b>Strong & Rising</b> (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
+      message += `• <b>Bearish/Weak</b> (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n\n`;
 
       if (buyOpportunities.length > 0) {
-        message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use \`trade <symbol> <amount>\` to place selective orders.`;
+        message += `🚀 <b>Action</b>: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use <code>trade &lt;symbol&gt; &lt;amount&gt;</code> to place selective orders.`;
       } else if (strongRising.length > 0) {
-        message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
+        message += `💎 <b>Action</b>: Market is strong but not at a discount. No new entries recommended.`;
       } else {
-        message += `⚠️ *Action*: Market looks weak. Stay cautious.`;
+        message += `⚠️ <b>Action</b>: Market looks weak. Stay cautious.`;
       }
 
-      await this.sendBotMessage(message);
+      await this.sendBotHtmlMessage(message);
     } catch (err: any) {
       console.error(`Failed handleSectorAnalysis for ${category}:`, err.message);
       await this.sendBotMessage(`❌ *Sector Analysis Failed*: ${err.message}`);
@@ -1193,23 +1265,29 @@ export class TradingAgent extends Agent<Env> {
       const finalResults = directGrowth.length > 0 ? directGrowth : results;
       const limited = finalResults.slice(0, 15); // limit to 15 to fit in Telegram limits
 
-      let message = `🔍 *AMFI Search Results* for: _"${query}"_\n`;
+      let message = `🔍 <b>AMFI Search Results</b> for: <i>"${escapeHtml(query)}"</i>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
       for (const r of limited) {
-        message += `• *${r.scheme_name}*\n`;
-        message += `  AMFI Code: \`${r.scheme_code}\`\n`;
-        message += `  ISIN Growth: \`${r.isin_growth || "N/A"}\`\n`;
-        message += `  NAV: *₹${r.latest_nav ?? "N/A"}* (${r.date})\n\n`;
+        const schemeName = escapeHtml(r.scheme_name);
+        const schemeCode = escapeHtml(r.scheme_code);
+        const isinGrowth = escapeHtml(r.isin_growth || "N/A");
+        const latestNav = escapeHtml(r.latest_nav ?? "N/A");
+        const date = escapeHtml(r.date || "N/A");
+
+        message += `• <b>${schemeName}</b>\n`;
+        message += `  AMFI Code: <code>${schemeCode}</code>\n`;
+        message += `  ISIN Growth: <code>${isinGrowth}</code>\n`;
+        message += `  NAV: <b>₹${latestNav}</b> (${date})\n\n`;
       }
 
       message += `━━━━━━━━━━━━━━━━━━━━━\n`;
       if (finalResults.length > 15) {
-        message += `💡 _Showing top 15 of ${finalResults.length} matches. Try a more specific query if your fund is not listed._\n\n`;
+        message += `💡 <i>Showing top 15 of ${finalResults.length} matches. Try a more specific query if your fund is not listed.</i>\n\n`;
       }
-      message += `📊 _Use command "/analyze_mf" or "analyze mf holdings" to trigger portfolio analysis._`;
+      message += `📊 <i>Use command "/analyze_mf" or "analyze mf holdings" to trigger portfolio analysis.</i>`;
 
-      await this.sendBotMessage(message);
+      await this.sendBotHtmlMessage(message);
     } catch (err: any) {
       console.error("Failed handleSearchMF:", err.message);
       await this.sendBotMessage(`❌ *Search Failed*: ${err.message}`);

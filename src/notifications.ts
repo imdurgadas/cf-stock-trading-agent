@@ -1,6 +1,7 @@
 export interface TelegramConfig {
   botToken: string;
   chatId: string;
+  parseMode?: 'Markdown' | 'HTML';
 }
 
 export async function sendTelegramMessage(message: string, config: TelegramConfig) {
@@ -14,7 +15,7 @@ export async function sendTelegramMessage(message: string, config: TelegramConfi
     body: JSON.stringify({
       chat_id: config.chatId,
       text: message,
-      parse_mode: 'Markdown',
+      parse_mode: config.parseMode || 'Markdown',
     }),
   });
 
