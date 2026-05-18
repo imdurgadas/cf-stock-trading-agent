@@ -393,6 +393,17 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
+    // New Command: Deep Technical Analysis of Mutual Fund Watchlist
+    if (
+      text === "mf_watchlist" ||
+      text === "mf watchlist" ||
+      text === "analyze mf watchlist" ||
+      text === "analyze_mf_watchlist"
+    ) {
+      await this.handleAnalyzeMFWatchlist();
+      return;
+    }
+
     // New AMFI Wildcard Mutual Fund Search Command
     if (
       text === "mf_search" ||
@@ -811,6 +822,38 @@ export class TradingAgent extends Agent<Env> {
     return JSON.parse((result as any).content[0].text);
   }
 
+  private async handleAnalyzeMFWatchlist() {
+    await this.sendBotMessage("🔍 *Mutual Fund Watchlist Deep Technical Scan Started*...\nQuerying our Technical Analysis MCP Server...");
+    try {
+      const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
+      let message = `🌾 *Mutual Fund Watchlist Deep Technical Scan*\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      for (const mcp of watchlistResults) {
+        const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
+          : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
+          : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
+          : "🔴";
+
+        message += `• *${mcp?.meta?.scheme_name || "Unknown Fund"}*\n`;
+        message += `  House: _${mcp?.meta?.fund_house || "N/A"}_ | Scheme: \`${mcp?.meta?.scheme_code}\`\n`;
+        message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}*\n`;
+        message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}*\n`;
+        message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}*\n`;
+        message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
+        message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
+      }
+
+      message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      message += `💡 _Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth._`;
+      
+      await this.sendBotMessage(message);
+    } catch (err: any) {
+      console.error("Failed to analyze MF watchlist:", err);
+      await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
+    }
+  }
+
   private async handleAnalyzeMFHoldings(useMock: boolean) {
     let holdings: any[] = [];
     if (useMock) {
@@ -828,36 +871,8 @@ export class TradingAgent extends Agent<Env> {
 
     if (!holdings || holdings.length === 0) {
       await this.sendBotMessage("📭 No active mutual fund holdings found. Performing deep scan on our High-Conviction Mutual Fund Watchlist instead... 🔍");
-      try {
-        const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
-        let message = `🌾 *Mutual Fund Watchlist Deep Technical Scan*\n`;
-        message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-        for (const mcp of watchlistResults) {
-          const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
-            : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
-            : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
-            : "🔴";
-
-          message += `• *${mcp?.meta?.scheme_name || "Unknown Fund"}*\n`;
-          message += `  House: _${mcp?.meta?.fund_house || "N/A"}_ | Scheme: \`${mcp?.meta?.scheme_code}\`\n`;
-          message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}*\n`;
-          message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}*\n`;
-          message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}*\n`;
-          message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
-          message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
-        }
-
-        message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-        message += `💡 _Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth._`;
-        
-        await this.sendBotMessage(message);
-        return;
-      } catch (err: any) {
-        console.error("Failed to analyze MF watchlist:", err);
-        await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
-        return;
-      }
+      await this.handleAnalyzeMFWatchlist();
+      return;
     }
 
     await this.sendBotMessage(`🔍 *Mutual Fund Portfolio Deep Risk Analysis Started*...\nQuerying our Technical Analysis MCP Server...`);
@@ -1264,7 +1279,12 @@ export default {
     if (url.pathname === "/telegram-webhook") {
       const update = await request.json();
       const agent = await env.TRADING_AGENT.get(env.TRADING_AGENT.idFromName("default"));
-      await agent.handleTelegramUpdate(update);
+      // Acknowledge Telegram immediately to prevent timeout & retries, and process in background
+      ctx.waitUntil(
+        agent.handleTelegramUpdate(update).catch((err: any) => {
+          console.error("[Agent] Error processing Telegram update:", err.message);
+        })
+      );
       return new Response("OK");
     }
 
@@ -1273,7 +1293,7 @@ export default {
       if (authError) return authError;
 
       const webhookUrl = `${env.BASE_URL}/telegram-webhook`;
-      const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}&drop_pending_updates=true`);
       const result = await response.json();
       return new Response(JSON.stringify(result, null, 2), { headers: { "Content-Type": "application/json" } });
     }

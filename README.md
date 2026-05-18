@@ -111,6 +111,7 @@ To display a command suggestion menu when you type `/` in the chat, register the
     kite_trade - View pending trade scan or trigger custom orders
     mf - View mutual fund holdings with live NAVs
     mf_analyze - Run mutual fund portfolio risk & returns analysis
+    mf_watchlist - Run deep technical & risk scan on default 9-fund watchlist
     mf_search - Search AMFI master database for Direct Growth schemes
     etf_analyze - Run automated ETF watchlist technical analysis
     it_analyze - Run IT sector watchlist technical analysis
@@ -131,7 +132,8 @@ The bot supports resilient command patterns, allowing you to trigger them with o
 | `/kite_analyze` | `kite_analyze` / `stock_analyze` / `analyze_holdings` | `mock analyze` | **Equity Holdings Scan**: Extracts active equity symbols, maps to NSE (`.NS`), and runs stock-mcp High-Conviction scans. |
 | `/kite_trade <amount>` | `kite_trade <symbol> <amount>` / `trade <amount>` | N/A | Starts an order flow scan or targets a specific stock to buy (e.g. `kite_trade INFY 5000`). |
 | `/mf` | `mf` / `mf holdings` / `mutual fund holdings` | `mock mf` | Fetches active mutual fund holdings, average costs, current NAVs, and returns. |
-| `/mf_analyze` | `mf_analyze` / `analyze mf` / `mf_analysis` | `mock analyze mf` | **MF Health Card**: Evaluates mutual fund returns, top/under-performers, and asset allocation. **Falls back to high-conviction 9-fund watchlist scan if empty!** |
+| `/mf_analyze` | `mf_analyze` / `analyze mf` / `mf_analysis` | `mock analyze mf` | **MF Portfolio Card**: Evaluates active mutual fund holdings returns, top/under-performers, and asset allocation. |
+| `/mf_watchlist` | `mf_watchlist` / `mf watchlist` / `analyze mf watchlist` | N/A | **MF Watchlist Scan**: Runs the deep technical indicator, CAGR, Sharpe/Sortino ratios, and graded analysis on our default **9-fund High-Conviction Mutual Fund watchlist** on-demand. **No Kite session required!** |
 | `/mf_search <query>` | `mf_search <query>` / `search_mf <query>` | N/A | **AMFI Search Engine**: Searches the 17,000+ active mutual fund registry from AMFI in real-time, matching wildcards (e.g. `mf_search Mirae`) and prioritizing direct growth schemes. |
 | `/etf_analyze` | `etf_analyze` / `analyze` / `do analysis` | N/A | **ETF Watchlist Scan**: Runs the technical analysis on the default **ETF** watchlist on-demand. **No Kite session required!** |
 | `/it_analyze` | `it_analyze` / `analyze it` | N/A | **IT Watchlist Scan**: Evaluates the full technical indicators of the active IT sector watchlist on-demand. |
