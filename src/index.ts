@@ -202,6 +202,32 @@ export class TradingAgent extends Agent<Env> {
     return await this.runWorkflow("TRADING_WORKFLOW", { amount, mock });
   }
 
+  async getAvailableBalance(): Promise<string> {
+    const isMock = await this.ctx.storage.get<boolean>("current_run_mock");
+    if (isMock) {
+      return "₹10,000.00 (Mock Account)";
+    }
+
+    try {
+      const kite = await this.initKite();
+      if (!kite.access_token) {
+        return "Unknown (Kite Session Expired)";
+      }
+
+      const margins = await kite.getMargins();
+      if (margins && margins.equity) {
+        const netBalance = margins.equity.net;
+        const availableCash = margins.equity.available?.cash;
+        const balance = availableCash !== undefined ? availableCash : netBalance;
+        return `₹${Number(balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
+      return "Unknown (No Equity Margin Data)";
+    } catch (err: any) {
+      console.error("[Agent] Failed to fetch Kite margins:", err.message);
+      return "Unknown (Error fetching balance)";
+    }
+  }
+
   @callable()
   async handleTelegramUpdate(update: any) {
     const text = update.message?.text?.toLowerCase();
@@ -222,7 +248,8 @@ export class TradingAgent extends Agent<Env> {
       }
 
       const symbols = opportunities.map(o => o.symbol).join(", ");
-      await this.sendBotMessage(`⚠️ *Confirmation*: Buy ${symbols} for ₹${amount}?\nReply "yes" to confirm or "no" to cancel.`);
+      const balanceStr = await this.getAvailableBalance();
+      await this.sendBotMessage(`⚠️ *Confirmation*: Buy ${symbols} for ₹${amount}?\n💰 *Available Balance*: ${balanceStr}\n\nReply "yes" to confirm or "no" to cancel.`);
       return;
     }
 

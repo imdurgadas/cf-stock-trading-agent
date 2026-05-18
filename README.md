@@ -3,9 +3,9 @@
 An automated stock trading agent built on Cloudflare Workers, using **Workflows**, **Durable Objects (Agents)**, and the **Model Context Protocol (MCP)**.
 
 ## Features
-- 📊 **Watchlist Analysis**: Daily reports sent to Telegram at 2:45 PM IST.
-- 🚀 **Automated Trading**: Scans for buy opportunities at 3:10 PM IST.
-- 👤 **Human-in-the-Loop**: Orders are only placed after you approve them via a Telegram link.
+- 📊 **Watchlist Analysis**: Reports sent to Telegram at 2:45 PM IST on Weekdays (Mon-Fri).
+- 🚀 **Automated Trading**: Scans for buy opportunities at 3:10 PM IST on Weekdays (Mon-Fri).
+- 👤 **Human-in-the-Loop**: Orders are only placed after you approve them via Telegram, displaying your live available Zerodha balance for informed confirmation.
 - 🤖 **MCP Integration**: Uses a dedicated MCP server for technical analysis and Kite API execution.
 
 ## Prerequisites
@@ -56,5 +56,5 @@ npm run deploy
 - **Trading Scan**: [http://localhost:8787/test-trigger](http://localhost:8787/test-trigger)
 
 ### Scheduled Events
-- **2:45 PM IST**: Watchlist Analysis Report.
-- **3:10 PM IST**: Trading Scan & Approval Request.
+- **2:45 PM IST (Mon-Fri)**: Watchlist Analysis Report.
+- **3:10 PM IST (Mon-Fri)**: Trading Scan & Approval Request.
