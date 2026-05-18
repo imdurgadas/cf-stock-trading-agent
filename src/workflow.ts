@@ -120,7 +120,7 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
       return await agent.getWatchlist("ALL");
     });
 
-    const categories = ["ETF", "IT", "BANK", "ENERGY", "POTENTIAL"];
+    const categories = ["ETF"];
     const reports: Record<string, any[]> = {};
 
     // 2. Fetch analysis for each category in separate steps

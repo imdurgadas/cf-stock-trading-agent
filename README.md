@@ -108,9 +108,14 @@ To display a command suggestion menu when you type `/` in the chat, register the
     login - Generate secure Zerodha Kite Connect login link
     holdings - View active NSE equity and ETF holdings
     mf - View mutual fund holdings with live NAVs
-    analyze - Run daily sector watchlists technical analysis scans (No Kite session required)
+    analyze - Run automated ETF watchlist technical analysis (No Kite session required)
+    analyze_it - Run IT sector watchlist technical analysis
+    analyze_bank - Run banking sector watchlist technical analysis
+    analyze_energy - Run energy sector watchlist technical analysis
+    analyze_potential - Run high-growth structural stocks watchlist analysis
     analyze_holdings - Run stock-mcp technical analysis on NSE holdings (Kite session required)
-    analyze_mf - Run mutual fund portfolio health & asset diversification analysis
+    analyze_mf - Run mutual fund portfolio health analysis (Falls back to high-conviction watchlist if empty)
+    search_mf - Search AMFI mutual fund database for direct growth plans
     trade - View pending trade scan or trigger custom orders
     ```
 5. Send. The menu will immediately populate in your chat window.
@@ -124,9 +129,14 @@ The bot supports natural language command patterns, alongside standard slash com
 | `kite login` | `login` / `/login` | N/A | Generates a 10-minute secure authorization link to Zerodha Kite. |
 | `get kite holdings` | `holdings` / `/holdings` | `mock holdings` | Fetches active equity/ETF holdings, formats P&L status, and prints totals. |
 | `get mutual fund holdings` | `mf` / `mf holdings` / `/mf` | `mock mf` | Fetches active mutual fund holdings, average costs, current NAVs, and returns. |
-| `analyze` | `do analysis` / `/analyze` / `watchlist analysis` | N/A | **Watchlist Scan**: Runs daily sector watchlist technical analysis scans. **No Kite session required!** |
+| `analyze` | `do analysis` / `/analyze` / `watchlist analysis` | N/A | **Automated Watchlist Scan**: Runs the weekly/scheduled `WatchlistAnalysisWorkflow`. Limited **only** to the default **ETF** watchlist to minimize Telegram message noise. **No Kite session required!** |
+| `analyze_it` | `analyze it` / `/analyze_it` | N/A | **IT Watchlist Scan**: Evaluates the full technical indicators of the active IT sector watchlist on-demand. |
+| `analyze_bank` | `analyze bank` / `/analyze_bank` | N/A | **Banking Watchlist Scan**: Evaluates the full technical indicators of the active private and PSU banking watchlist on-demand. |
+| `analyze_energy` | `analyze energy` / `/analyze_energy` | N/A | **Energy Watchlist Scan**: Evaluates the full technical indicators of the active utility/energy sector watchlist on-demand. |
+| `analyze_potential` | `analyze potential` / `/analyze_potential` | N/A | **High-Growth Scan**: Evaluates active under-the-radar structural growth stocks (CDSL, RVNL, CDSL, CDSL, CDSL, CDSL) on-demand. |
 | `analyze_kite_holdings` | `analyze holdings` / `/analyze_holdings` / `/analyze_kite_holdings` | `mock analyze` | **Equity Holdings Scan**: Extracts holding symbols, maps them to NSE (`.NS`), and runs stock-mcp High-Conviction scans. |
-| `analyze_mf` | `analyze mf` / `/analyze_mf` / `/mf_analysis` | `mock analyze mf` | **MF Health Card**: Evaluates mutual fund returns, top/under-performers, and asset allocation percentage weights. |
+| `analyze_mf` | `analyze mf` / `/analyze_mf` / `/mf_analysis` | `mock analyze mf` | **MF Health Card**: Evaluates mutual fund returns, top/under-performers, and asset allocation percentage weights. **Falls back to scanning the high-conviction 9-fund Mutual Fund Watchlist automatically if portfolio holdings are empty!** |
+| `search_mf <query>` | `search mf` / `/search_mf` | N/A | **AMFI Search Engine**: Searches the 17,000+ active mutual fund registry from AMFI in real-time, matching wildcards (e.g. `search_mf Mirae` or `search_mf Quant`) and prioritizing direct growth schemes. |
 | `trade <amount>` | `trade <symbol> <amount>` | N/A | Starts an order flow scan or targets a specific stock to buy (e.g. `trade INFY 5000`). |
 
 ---

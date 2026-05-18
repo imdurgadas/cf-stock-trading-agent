@@ -345,6 +345,24 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
+    // New Watchlist Sector Commands
+    if (text === "analyze it" || text === "analyze_it" || text === "/analyze_it") {
+      await this.handleSectorAnalysis("IT");
+      return;
+    }
+    if (text === "analyze bank" || text === "analyze_bank" || text === "/analyze_bank") {
+      await this.handleSectorAnalysis("BANK");
+      return;
+    }
+    if (text === "analyze energy" || text === "analyze_energy" || text === "/analyze_energy") {
+      await this.handleSectorAnalysis("ENERGY");
+      return;
+    }
+    if (text === "analyze potential" || text === "analyze_potential" || text === "/analyze_potential") {
+      await this.handleSectorAnalysis("POTENTIAL");
+      return;
+    }
+
     // 5. Command: Do Technical Analysis of Kite Holdings (Kite Session Required)
     if (
       text === "analyze holdings" ||
@@ -370,6 +388,17 @@ export class TradingAgent extends Agent<Env> {
     ) {
       const useMock = text.includes("mock");
       await this.handleAnalyzeMFHoldings(useMock);
+      return;
+    }
+
+    // New AMFI Wildcard Mutual Fund Search Command
+    if (text.startsWith("search mf ") || text.startsWith("search_mf ") || text.startsWith("/search_mf ")) {
+      const query = text.replace(/^(\/)?search(_)?mf\s+/, "").trim();
+      if (!query) {
+        await this.sendBotMessage("⚠️ Please provide a query, e.g. `/search_mf Mirae` or `/search_mf Parag`.");
+        return;
+      }
+      await this.handleSearchMF(query);
       return;
     }
 
@@ -496,6 +525,60 @@ export class TradingAgent extends Agent<Env> {
     await this.sendBotMessage(message);
   }
 
+  private async enrichMFHoldings(holdings: any[]): Promise<any[]> {
+    return Promise.all(
+      holdings.map(async (h) => {
+        const queryName = h.name || h.tradingsymbol || "";
+        const cleanName = queryName.replace(/_/g, " ").trim();
+        
+        let schemeCode = null;
+        let schemeName = h.name || cleanName;
+        let fundHouse = "Unknown Fund House";
+
+        if (cleanName.length > 0) {
+          try {
+            const searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanName)}`);
+            if (searchRes.ok) {
+              const searchJson = await searchRes.json() as any[];
+              if (searchJson && searchJson.length > 0) {
+                // Find the best match containing Direct and Growth
+                let bestMatch = searchJson[0];
+                for (const match of searchJson) {
+                  const matchLower = match.schemeName.toLowerCase();
+                  if (matchLower.includes("direct") && matchLower.includes("growth")) {
+                    bestMatch = match;
+                    break;
+                  }
+                }
+                
+                schemeCode = bestMatch.schemeCode;
+                schemeName = bestMatch.schemeName;
+
+                // Fetch details for fund house
+                const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
+                if (detailsRes.ok) {
+                  const detailsJson = await detailsRes.json() as any;
+                  if (detailsJson.meta) {
+                    fundHouse = detailsJson.meta.fund_house || "Unknown Fund House";
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.error(`Error enriching MF holding ${queryName}:`, e);
+          }
+        }
+
+        return {
+          ...h,
+          name: schemeName,
+          schemeCode: schemeCode || "N/A",
+          fundHouse
+        };
+      })
+    );
+  }
+
   private async handleGetMFHoldings(useMock: boolean) {
     let holdings: any[] = [];
     if (useMock) {
@@ -516,13 +599,18 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
+    await this.sendBotMessage(`🔍 *Retrieving Live NAVs & Mutual Fund Details*...`);
+    
+    // Enrich holdings with name, scheme code, and fund house
+    const enriched = await this.enrichMFHoldings(holdings);
+
     let message = `🌾 *Mutual Fund Holdings*\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
     let totalInvested = 0;
     let totalCurrent = 0;
 
-    for (const h of holdings) {
+    for (const h of enriched) {
       const qty = h.quantity || 0;
       if (qty === 0) continue;
 
@@ -530,7 +618,7 @@ export class TradingAgent extends Agent<Env> {
       const ltp = h.last_price || 0; // last NAV
       const invested = qty * avg;
       const current = qty * ltp;
-      const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
+      const pnl = current - invested;
       const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
 
       totalInvested += invested;
@@ -539,9 +627,11 @@ export class TradingAgent extends Agent<Env> {
       const trend = pnl >= 0 ? "🟢" : "🔴";
       const sign = pnl >= 0 ? "+" : "";
 
-      message += `• *${h.tradingsymbol}* (ISIN: ${h.isin || "N/A"})\n`;
-      message += `  Units: ${qty.toFixed(3)} | Avg NAV: ₹${avg.toFixed(4)}\n`;
-      message += `  Last NAV: ₹${ltp.toFixed(4)} | Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      message += `• *${h.name}*\n`;
+      message += `  House: _${h.fundHouse}_ | Scheme: \`${h.schemeCode}\`\n`;
+      message += `  ISIN: ${h.isin || "N/A"} | Units: ${qty.toFixed(3)}\n`;
+      message += `  Avg NAV: ₹${avg.toFixed(4)} | Last NAV: ₹${ltp.toFixed(4)}\n`;
+      message += `  Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
       message += `  P&L: *${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${pnlPct.toFixed(2)}%)\n\n`;
     }
 
@@ -660,6 +750,24 @@ export class TradingAgent extends Agent<Env> {
     }
   }
 
+  async analyzeMutualFundMCP(schemeCode?: number) {
+    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
+      transport: { type: "streamable-http" }
+    });
+    await this.mcp.waitForConnections();
+
+    const args = schemeCode !== undefined ? { scheme_code: schemeCode } : {};
+
+    const result = await this.mcp.callTool({
+      serverId,
+      name: "analyze_mutual_fund",
+      arguments: args
+    });
+
+    if (result.isError) throw new Error("MCP Mutual Fund Analysis Tool Error");
+    return JSON.parse((result as any).content[0].text);
+  }
+
   private async handleAnalyzeMFHoldings(useMock: boolean) {
     let holdings: any[] = [];
     if (useMock) {
@@ -676,19 +784,72 @@ export class TradingAgent extends Agent<Env> {
     }
 
     if (!holdings || holdings.length === 0) {
-      await this.sendBotMessage("📭 No mutual fund holdings found to analyze.");
-      return;
+      await this.sendBotMessage("📭 No active mutual fund holdings found. Performing deep scan on our High-Conviction Mutual Fund Watchlist instead... 🔍");
+      try {
+        const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
+        let message = `🌾 *Mutual Fund Watchlist Deep Technical Scan*\n`;
+        message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+        for (const mcp of watchlistResults) {
+          const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
+            : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
+            : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
+            : "🔴";
+
+          message += `• *${mcp?.meta?.scheme_name || "Unknown Fund"}*\n`;
+          message += `  House: _${mcp?.meta?.fund_house || "N/A"}_ | Scheme: \`${mcp?.meta?.scheme_code}\`\n`;
+          message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}*\n`;
+          message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}*\n`;
+          message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}*\n`;
+          message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
+          message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
+        }
+
+        message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+        message += `💡 _Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth._`;
+        
+        await this.sendBotMessage(message);
+        return;
+      } catch (err: any) {
+        console.error("Failed to analyze MF watchlist:", err);
+        await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
+        return;
+      }
     }
 
-    await this.sendBotMessage(`🔍 *Mutual Fund Portfolio Analysis Started*...`);
+    await this.sendBotMessage(`🔍 *Mutual Fund Portfolio Deep Risk Analysis Started*...\nQuerying our Technical Analysis MCP Server...`);
+
+    // Enrich holdings with name, scheme code, and fund house
+    const enriched = await this.enrichMFHoldings(holdings);
+
+    // Call MCP Server tool in parallel for all holdings with a valid schemeCode
+    const analyzed = await Promise.all(
+      enriched.map(async (h) => {
+        let mcpAnalysis = null;
+        if (h.schemeCode && h.schemeCode !== "N/A" && typeof h.schemeCode === "number") {
+          try {
+            mcpAnalysis = await this.analyzeMutualFundMCP(h.schemeCode);
+          } catch (e) {
+            console.error(`Failed to analyze mutual fund via MCP for schemeCode ${h.schemeCode}:`, e);
+          }
+        }
+        return {
+          ...h,
+          mcpAnalysis
+        };
+      })
+    );
 
     let totalInvested = 0;
     let totalCurrent = 0;
-    let topPerformer = { symbol: "", pnlPct: -Infinity, pnl: 0 };
-    let underPerformer = { symbol: "", pnlPct: Infinity, pnl: 0 };
-    const allocationData: { symbol: string; value: number; pct: number }[] = [];
+    let topPerformer = { name: "", symbol: "", fundHouse: "", schemeCode: "", pnlPct: -Infinity, pnl: 0 };
+    let underPerformer = { name: "", symbol: "", fundHouse: "", schemeCode: "", pnlPct: Infinity, pnl: 0 };
+    const allocationData: { name: string; value: number; pct: number }[] = [];
 
-    for (const h of holdings) {
+    let message = `🌾 *Mutual Fund Portfolio Health Card*\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    for (const h of analyzed) {
       const qty = h.quantity || 0;
       if (qty === 0) continue;
 
@@ -696,20 +857,35 @@ export class TradingAgent extends Agent<Env> {
       const ltp = h.last_price || 0;
       const invested = qty * avg;
       const current = qty * ltp;
-      const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
+      const pnl = current - invested;
       const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
 
       totalInvested += invested;
       totalCurrent += current;
 
       if (pnlPct > topPerformer.pnlPct) {
-        topPerformer = { symbol: h.tradingsymbol, pnlPct, pnl };
+        topPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
       }
       if (pnlPct < underPerformer.pnlPct) {
-        underPerformer = { symbol: h.tradingsymbol, pnlPct, pnl };
+        underPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
       }
 
-      allocationData.push({ symbol: h.tradingsymbol, value: current, pct: 0 });
+      allocationData.push({ name: h.name, value: current, pct: 0 });
+
+      // Append individual fund analysis
+      const mcp = h.mcpAnalysis;
+      const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
+        : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
+        : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
+        : "🔴";
+
+      message += `• *${h.name}*\n`;
+      message += `  House: _${h.fundHouse}_ | Scheme: \`${h.schemeCode}\`\n`;
+      message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}*\n`;
+      message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}*\n`;
+      message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}*\n`;
+      message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
+      message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
     }
 
     // Calculate asset allocation weights
@@ -725,26 +901,27 @@ export class TradingAgent extends Agent<Env> {
     const trend = totalPnL >= 0 ? "🟢" : "🔴";
     const sign = totalPnL >= 0 ? "+" : "";
 
-    let message = `🌾 *Mutual Fund Portfolio Health Card*\n`;
-    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
     message += `💰 *Total Wealth*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
     message += `💰 *Invested Value*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
     message += `📈 *Net Returns*: *${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
 
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
     message += `🏆 *Top Performer*:\n`;
-    if (topPerformer.symbol) {
+    if (topPerformer.name) {
       const topSign = topPerformer.pnl >= 0 ? "+" : "";
-      message += `• *${topPerformer.symbol}*\n`;
+      message += `• *${topPerformer.name}*\n`;
+      message += `  House: _${topPerformer.fundHouse}_ | Scheme: \`${topPerformer.schemeCode}\`\n`;
       message += `  PnL: *${topSign}${topPerformer.pnlPct.toFixed(2)}%* (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
     } else {
       message += `• N/A\n\n`;
     }
 
     message += `📉 *Underperformer*:\n`;
-    if (underPerformer.symbol && underPerformer.symbol !== topPerformer.symbol) {
+    if (underPerformer.name && underPerformer.symbol !== topPerformer.symbol) {
       const underSign = underPerformer.pnl >= 0 ? "+" : "";
-      message += `• *${underPerformer.symbol}*\n`;
+      message += `• *${underPerformer.name}*\n`;
+      message += `  House: _${underPerformer.fundHouse}_ | Scheme: \`${underPerformer.schemeCode}\`\n`;
       message += `  PnL: *${underSign}${underPerformer.pnlPct.toFixed(2)}%* (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
     } else {
       message += `• N/A (Single asset portfolio or identical performers)\n\n`;
@@ -753,7 +930,7 @@ export class TradingAgent extends Agent<Env> {
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
     message += `⚖️ *Asset Allocation & Diversification*:\n`;
     for (const item of allocationData) {
-      message += `• *${item.symbol}*: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
+      message += `• *${item.name}*: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
     }
 
     if (totalPnLPct >= 10) {
@@ -804,6 +981,7 @@ export class TradingAgent extends Agent<Env> {
     return [
       {
         tradingsymbol: "NIPPON_INDIA_SMALL_CAP",
+        name: "Nippon India Small Cap Fund - Direct Plan - Growth Plan",
         isin: "INF204K01014",
         quantity: 1250.45,
         average_price: 85.30,
@@ -813,6 +991,7 @@ export class TradingAgent extends Agent<Env> {
       },
       {
         tradingsymbol: "SBI_CONTRA_FUND",
+        name: "SBI Contra Fund - Direct Plan - Growth",
         isin: "INF179K01970",
         quantity: 500.00,
         average_price: 150.00,
@@ -838,6 +1017,133 @@ export class TradingAgent extends Agent<Env> {
     console.log("Kite Postback Received:", data);
     // You could send a Telegram message here for important updates
     return { status: "received" };
+  }
+
+  private async handleSectorAnalysis(category: string) {
+    await this.sendBotMessage(`🔍 *Watchlist Sector Scan Started*: Scanning category *${category}*...`);
+    try {
+      const watchlist = await this.getWatchlist(category);
+      if (!watchlist || watchlist.length === 0) {
+        await this.sendBotMessage(`📭 Category *${category}* is empty or not found.`);
+        return;
+      }
+
+      const analysis = await this.getWatchlistAnalysis(watchlist);
+      if (!analysis || analysis.length === 0) {
+        await this.sendBotMessage(`❌ Failed to fetch analysis for category *${category}*.`);
+        return;
+      }
+
+      let message = `📂 *Watchlist Sector: ${category}*\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      const buyOpportunities: string[] = [];
+      const strongRising: string[] = [];
+      const bearishWeak: string[] = [];
+
+      for (const stock of analysis) {
+        const trend = stock.is_st_green ? "🟢" : "🔴";
+        const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
+        const isDip = stock.fall_pct <= -2;
+
+        if (isBullish) {
+          if (isDip) {
+            buyOpportunities.push(stock.symbol);
+          } else {
+            strongRising.push(stock.symbol);
+          }
+        } else {
+          bearishWeak.push(stock.symbol);
+        }
+
+        message += `*${stock.symbol}* ${trend}\n`;
+        message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
+        message += `• RSI: ${stock.rsi?.toFixed(1) ?? "N/A"} | ADX: ${stock.adx?.toFixed(1) ?? "N/A"}${stock.adx >= 25 ? " 🔥" : ""}\n`;
+        message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
+        message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
+        message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
+        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
+        message += `• Recommendation: *${stock.recommendation}*\n`;
+        message += `• Analysis: _${stock.comment}_\n\n`;
+      }
+
+      // Add Sector Summary
+      message += `━━━━━━━━━━━━━━━\n`;
+      message += `📈 *Sector Summary (${category})*:\n`;
+      message += `• *Buy Opportunities* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+      message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+      message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
+
+      if (buyOpportunities.length > 0) {
+        message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use \`trade <symbol> <amount>\` to place selective orders.`;
+      } else if (strongRising.length > 0) {
+        message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
+      } else {
+        message += `⚠️ *Action*: Market looks weak. Stay cautious.`;
+      }
+
+      await this.sendBotMessage(message);
+    } catch (err: any) {
+      console.error(`Failed handleSectorAnalysis for ${category}:`, err.message);
+      await this.sendBotMessage(`❌ *Sector Analysis Failed*: ${err.message}`);
+    }
+  }
+
+  async searchMutualFundsMCP(query: string) {
+    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
+      transport: { type: "streamable-http" }
+    });
+    await this.mcp.waitForConnections();
+
+    const result = await this.mcp.callTool({
+      serverId,
+      name: "search_mutual_funds",
+      arguments: { query }
+    });
+
+    if (result.isError) throw new Error("MCP search_mutual_funds Tool Error");
+    return JSON.parse((result as any).content[0].text);
+  }
+
+  private async handleSearchMF(query: string) {
+    await this.sendBotMessage(`🔍 *Searching AMFI Database* for direct growth schemes matching: "${query}"...`);
+    try {
+      const results = await this.searchMutualFundsMCP(query);
+      if (!results || results.length === 0) {
+        await this.sendBotMessage(`📭 No mutual funds found matching: "${query}".`);
+        return;
+      }
+
+      // Filter matches to prioritize direct growth plans
+      const directGrowth = results.filter((r: any) => {
+        const name = r.scheme_name.toLowerCase();
+        return name.includes("direct") && (name.includes("growth") || name.includes("direct plan"));
+      });
+
+      // If direct growth is empty, use all results
+      const finalResults = directGrowth.length > 0 ? directGrowth : results;
+      const limited = finalResults.slice(0, 15); // limit to 15 to fit in Telegram limits
+
+      let message = `🔍 *AMFI Search Results* for: _"${query}"_\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      for (const r of limited) {
+        message += `• *${r.scheme_name}*\n`;
+        message += `  AMFI Code: \`${r.scheme_code}\`\n`;
+        message += `  ISIN Growth: \`${r.isin_growth || "N/A"}\`\n`;
+        message += `  NAV: *₹${r.latest_nav ?? "N/A"}* (${r.date})\n\n`;
+      }
+
+      message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      if (finalResults.length > 15) {
+        message += `💡 _Showing top 15 of ${finalResults.length} matches. Try a more specific query if your fund is not listed._\n\n`;
+      }
+      message += `📊 _Use command "/analyze_mf" or "analyze mf holdings" to trigger portfolio analysis._`;
+
+      await this.sendBotMessage(message);
+    } catch (err: any) {
+      console.error("Failed handleSearchMF:", err.message);
+      await this.sendBotMessage(`❌ *Search Failed*: ${err.message}`);
+    }
   }
 }
 
