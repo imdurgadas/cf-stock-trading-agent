@@ -394,13 +394,26 @@ export class TradingAgent extends Agent<Env> {
     }
 
     // New AMFI Wildcard Mutual Fund Search Command
-    if (text.startsWith("mf_search ") || text.startsWith("search mf ") || text.startsWith("search_mf ")) {
-      const query = text.replace(/^(mf_search|search_mf|search mf)\s+/, "").trim();
+    if (
+      text === "mf_search" ||
+      text.startsWith("mf_search ") ||
+      text === "search_mf" ||
+      text.startsWith("search_mf ") ||
+      text === "search mf" ||
+      text.startsWith("search mf ")
+    ) {
+      const query = text.replace(/^(mf_search|search_mf|search mf)\s*/, "").trim();
       if (!query) {
-        await this.sendBotMessage("⚠️ Please provide a query, e.g. `mf_search Mirae` or `mf_search Parag`.");
+        await this.sendBotMessage("🔍 *Mutual Fund Search*\n\n⚠️ Please provide a fund name or house query, e.g.:\n• `mf_search Mirae`\n• `mf_search Parag Parikh`\n• `mf_search Quant`\n• `mf_search Zerodha`\n\n💡 _This searches 17,000+ mutual fund plans on AMFI in real-time, focusing on Direct Growth plans!_");
         return;
       }
       await this.handleSearchMF(query);
+      return;
+    }
+
+    // Help for trade command if run without arguments
+    if (text === "kite_trade" || text === "trade") {
+      await this.sendBotMessage("🛒 *Manual Trade Command*\n\n⚠️ Please specify the amount or symbol, e.g.:\n• `kite_trade 5000` (to buy active watchlist opportunities)\n• `kite_trade INFY 5000` (to buy a specific stock)");
       return;
     }
 
