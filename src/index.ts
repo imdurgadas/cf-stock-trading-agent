@@ -523,33 +523,51 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
-    let message = `📊 *Kite Equity Holdings*\n`;
-    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    // 1. Send Header
+    await this.sendBotHtmlMessage(`📊 <b>Kite Equity Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
     let totalInvested = 0;
     let totalCurrent = 0;
 
-    for (const h of holdings) {
+    // Filter valid holdings
+    const validHoldings = holdings.filter(h => {
       const qty = (h.quantity || 0) + (h.t1_quantity || 0);
-      if (qty === 0) continue;
+      return qty > 0;
+    });
 
-      const avg = h.average_price || 0;
-      const ltp = h.last_price || 0;
-      const invested = qty * avg;
-      const current = qty * ltp;
-      const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
-      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+    // 2. Send Stock Items in chunks of 5
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < validHoldings.length; i += CHUNK_SIZE) {
+      const chunk = validHoldings.slice(i, i + CHUNK_SIZE);
+      let chunkMsg = "";
 
-      totalInvested += invested;
-      totalCurrent += current;
+      for (const h of chunk) {
+        const qty = (h.quantity || 0) + (h.t1_quantity || 0);
+        const avg = h.average_price || 0;
+        const ltp = h.last_price || 0;
+        const invested = qty * avg;
+        const current = qty * ltp;
+        const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
+        const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
 
-      const trend = pnl >= 0 ? "🟢" : "🔴";
-      const sign = pnl >= 0 ? "+" : "";
+        totalInvested += invested;
+        totalCurrent += current;
 
-      message += `• *${h.tradingsymbol}* (${h.exchange || "NSE"})\n`;
-      message += `  Qty: ${qty} | Avg: ₹${avg.toFixed(2)}\n`;
-      message += `  LTP: ₹${ltp.toFixed(2)} | Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-      message += `  P&L: *${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+        const trend = pnl >= 0 ? "🟢" : "🔴";
+        const sign = pnl >= 0 ? "+" : "";
+
+        const symbol = escapeHtml(h.tradingsymbol);
+        const exchange = escapeHtml(h.exchange || "NSE");
+
+        chunkMsg += `• <b>${symbol}</b> (${exchange})\n`;
+        chunkMsg += `  Qty: ${qty} | Avg: ₹${avg.toFixed(2)}\n`;
+        chunkMsg += `  LTP: ₹${ltp.toFixed(2)} | Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+        chunkMsg += `  P&L: <b>${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+      }
+
+      if (chunkMsg.trim()) {
+        await this.sendBotHtmlMessage(chunkMsg);
+      }
     }
 
     const totalPnL = totalCurrent - totalInvested;
@@ -557,16 +575,17 @@ export class TradingAgent extends Agent<Env> {
     const totalTrend = totalPnL >= 0 ? "🟢" : "🔴";
     const totalSign = totalPnL >= 0 ? "+" : "";
 
-    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💰 *Total Invested*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📈 *Current Value*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📊 *Total P&L*: *${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${totalSign}${totalPnLPct.toFixed(2)}%)\n`;
+    // 3. Send Portfolio Summary
+    let summaryMsg = `━━━━━━━━━━━━━━━━━━━━━\n`;
+    summaryMsg += `💰 <b>Total Invested</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    summaryMsg += `📈 <b>Current Value</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    summaryMsg += `📊 <b>Total P&L</b>: <b>${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${totalSign}${totalPnLPct.toFixed(2)}%)`;
     
     if (useMock) {
-      message += `\n⚠️ _This is a Mock Account demo._`;
+      summaryMsg += `\n\n⚠️ <i>This is a Mock Account demo.</i>`;
     }
 
-    await this.sendBotMessage(message);
+    await this.sendBotHtmlMessage(summaryMsg);
   }
 
   private async enrichMFHoldings(holdings: any[]): Promise<any[]> {
@@ -676,39 +695,54 @@ export class TradingAgent extends Agent<Env> {
     // Enrich holdings with name, scheme code, and fund house
     const enriched = await this.enrichMFHoldings(holdings);
 
-    let message = `🌾 <b>Mutual Fund Holdings</b>\n`;
-    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    // 1. Send Header
+    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
     let totalInvested = 0;
     let totalCurrent = 0;
 
-    for (const h of enriched) {
+    // Filter valid holdings
+    const validHoldings = enriched.filter(h => {
       const qty = h.quantity || 0;
-      if (qty === 0) continue;
+      return qty > 0;
+    });
 
-      const avg = h.average_price || 0;
-      const ltp = h.last_price || 0; // last NAV
-      const invested = qty * avg;
-      const current = qty * ltp;
-      const pnl = current - invested;
-      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+    // 2. Send MF Items in chunks of 4
+    const CHUNK_SIZE = 4;
+    for (let i = 0; i < validHoldings.length; i += CHUNK_SIZE) {
+      const chunk = validHoldings.slice(i, i + CHUNK_SIZE);
+      let chunkMsg = "";
 
-      totalInvested += invested;
-      totalCurrent += current;
+      for (const h of chunk) {
+        const qty = h.quantity || 0;
+        const avg = h.average_price || 0;
+        const ltp = h.last_price || 0; // last NAV
+        const invested = qty * avg;
+        const current = qty * ltp;
+        const pnl = current - invested;
+        const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
 
-      const trend = pnl >= 0 ? "🟢" : "🔴";
-      const sign = pnl >= 0 ? "+" : "";
+        totalInvested += invested;
+        totalCurrent += current;
 
-      const fundName = escapeHtml(h.name);
-      const fundHouse = escapeHtml(h.fundHouse);
-      const schemeCode = escapeHtml(h.schemeCode);
+        const trend = pnl >= 0 ? "🟢" : "🔴";
+        const sign = pnl >= 0 ? "+" : "";
 
-      message += `• <b>${fundName}</b>\n`;
-      message += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
-      message += `  ISIN: ${h.isin || "N/A"} | Units: ${qty.toFixed(3)}\n`;
-      message += `  Avg NAV: ₹${avg.toFixed(4)} | Last NAV: ₹${ltp.toFixed(4)}\n`;
-      message += `  Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-      message += `  P&L: <b>${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+        const fundName = escapeHtml(h.name);
+        const fundHouse = escapeHtml(h.fundHouse);
+        const schemeCode = escapeHtml(h.schemeCode);
+
+        chunkMsg += `• <b>${fundName}</b>\n`;
+        chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
+        chunkMsg += `  ISIN: ${escapeHtml(h.isin || "N/A")} | Units: ${qty.toFixed(3)}\n`;
+        chunkMsg += `  Avg NAV: ₹${avg.toFixed(4)} | Last NAV: ₹${ltp.toFixed(4)}\n`;
+        chunkMsg += `  Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+        chunkMsg += `  P&L: <b>${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+      }
+
+      if (chunkMsg.trim()) {
+        await this.sendBotHtmlMessage(chunkMsg);
+      }
     }
 
     const totalPnL = totalCurrent - totalInvested;
@@ -716,16 +750,17 @@ export class TradingAgent extends Agent<Env> {
     const totalTrend = totalPnL >= 0 ? "🟢" : "🔴";
     const totalSign = totalPnL >= 0 ? "+" : "";
 
-    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💰 <b>Total MF Invested</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📈 <b>Current MF Value</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📊 <b>Total MF P&L</b>: <b>${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${totalSign}${totalPnLPct.toFixed(2)}%)\n`;
+    // 3. Send Portfolio Summary
+    let summaryMsg = `━━━━━━━━━━━━━━━━━━━━━\n`;
+    summaryMsg += `💰 <b>Total MF Invested</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    summaryMsg += `📈 <b>Current MF Value</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    summaryMsg += `📊 <b>Total MF P&L</b>: <b>${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${totalSign}${totalPnLPct.toFixed(2)}%)`;
 
     if (useMock) {
-      message += `\n⚠️ <i>This is a Mock Account demo.</i>`;
+      summaryMsg += `\n\n⚠️ <i>This is a Mock Account demo.</i>`;
     }
 
-    await this.sendBotHtmlMessage(message);
+    await this.sendBotHtmlMessage(summaryMsg);
   }
 
   private async handleAnalyzeHoldings(useMock: boolean) {
@@ -858,39 +893,50 @@ export class TradingAgent extends Agent<Env> {
     await this.sendBotMessage("🔍 *Mutual Fund Watchlist Deep Technical Scan Started*...\nQuerying our Technical Analysis MCP Server...");
     try {
       const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
-      let message = `🌾 <b>Mutual Fund Watchlist Deep Technical Scan</b>\n`;
-      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      
+      // Send the header
+      await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Watchlist Deep Technical Scan</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
-      for (const mcp of watchlistResults) {
-        const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
-          : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
-          : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
-          : "🔴";
+      // Send mutual fund details in chunks of 3
+      const CHUNK_SIZE = 3;
+      for (let i = 0; i < watchlistResults.length; i += CHUNK_SIZE) {
+        const chunk = watchlistResults.slice(i, i + CHUNK_SIZE);
+        let chunkMsg = "";
 
-        const schemeName = escapeHtml(mcp?.meta?.scheme_name);
-        const fundHouse = escapeHtml(mcp?.meta?.fund_house);
-        const schemeCode = escapeHtml(mcp?.meta?.scheme_code);
-        const grade = escapeHtml(mcp?.evaluation?.grade);
-        const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
+        for (const mcp of chunk) {
+          const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
+            : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
+            : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
+            : "🔴";
 
-        message += `• <b>${schemeName}</b>\n`;
-        message += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
-        message += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
-        message += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
-        message += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
-        message += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
-        message += `  Comment: <i>"${comment}"</i>\n\n`;
+          const schemeName = escapeHtml(mcp?.meta?.scheme_name);
+          const fundHouse = escapeHtml(mcp?.meta?.fund_house);
+          const schemeCode = escapeHtml(mcp?.meta?.scheme_code);
+          const grade = escapeHtml(mcp?.evaluation?.grade);
+          const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
+
+          chunkMsg += `• <b>${schemeName}</b>\n`;
+          chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
+          chunkMsg += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
+          chunkMsg += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
+          chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
+          chunkMsg += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
+          chunkMsg += `  Comment: <i>"${comment}"</i>\n\n`;
+        }
+
+        await this.sendBotHtmlMessage(chunkMsg);
       }
 
-      message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      message += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
-      message += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
-      message += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
-      message += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
-      message += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.\n\n`;
-      message += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>`;
-      
-      await this.sendBotHtmlMessage(message);
+      // Send the footer (Glossary & Tip)
+      let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
+      footer += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
+      footer += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
+      footer += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
+      footer += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
+      footer += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.\n\n`;
+      footer += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>`;
+
+      await this.sendBotHtmlMessage(footer);
     } catch (err: any) {
       console.error("Failed to analyze MF watchlist:", err);
       await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
@@ -947,52 +993,62 @@ export class TradingAgent extends Agent<Env> {
     let underPerformer = { name: "", symbol: "", fundHouse: "", schemeCode: "", pnlPct: Infinity, pnl: 0 };
     const allocationData: { name: string; value: number; pct: number }[] = [];
 
-    let message = `🌾 <b>Mutual Fund Portfolio Health Card</b>\n`;
-    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    // 1. Send Header
+    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Portfolio Health Card</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
-    for (const h of analyzed) {
-      const qty = h.quantity || 0;
-      if (qty === 0) continue;
+    // 2. Send Individual Fund Technical Scan Cards in Chunks of 3
+    const CHUNK_SIZE = 3;
+    for (let i = 0; i < analyzed.length; i += CHUNK_SIZE) {
+      const chunk = analyzed.slice(i, i + CHUNK_SIZE);
+      let chunkMsg = "";
 
-      const avg = h.average_price || 0;
-      const ltp = h.last_price || 0;
-      const invested = qty * avg;
-      const current = qty * ltp;
-      const pnl = current - invested;
-      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+      for (const h of chunk) {
+        const qty = h.quantity || 0;
+        if (qty === 0) continue;
 
-      totalInvested += invested;
-      totalCurrent += current;
+        const avg = h.average_price || 0;
+        const ltp = h.last_price || 0;
+        const invested = qty * avg;
+        const current = qty * ltp;
+        const pnl = current - invested;
+        const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
 
-      if (pnlPct > topPerformer.pnlPct) {
-        topPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
+        totalInvested += invested;
+        totalCurrent += current;
+
+        if (pnlPct > topPerformer.pnlPct) {
+          topPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
+        }
+        if (pnlPct < underPerformer.pnlPct) {
+          underPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
+        }
+
+        allocationData.push({ name: h.name, value: current, pct: 0 });
+
+        const mcp = h.mcpAnalysis;
+        const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
+          : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
+          : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
+          : "🔴";
+
+        const fundName = escapeHtml(h.name);
+        const fundHouse = escapeHtml(h.fundHouse);
+        const schemeCode = escapeHtml(h.schemeCode);
+        const grade = escapeHtml(mcp?.evaluation?.grade);
+        const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
+
+        chunkMsg += `• <b>${fundName}</b>\n`;
+        chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
+        chunkMsg += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
+        chunkMsg += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
+        chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
+        chunkMsg += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
+        chunkMsg += `  Comment: <i>"${comment}"</i>\n\n`;
       }
-      if (pnlPct < underPerformer.pnlPct) {
-        underPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
+
+      if (chunkMsg.trim()) {
+        await this.sendBotHtmlMessage(chunkMsg);
       }
-
-      allocationData.push({ name: h.name, value: current, pct: 0 });
-
-      // Append individual fund analysis
-      const mcp = h.mcpAnalysis;
-      const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
-        : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
-        : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
-        : "🔴";
-
-      const fundName = escapeHtml(h.name);
-      const fundHouse = escapeHtml(h.fundHouse);
-      const schemeCode = escapeHtml(h.schemeCode);
-      const grade = escapeHtml(mcp?.evaluation?.grade);
-      const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
-
-      message += `• <b>${fundName}</b>\n`;
-      message += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
-      message += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
-      message += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
-      message += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
-      message += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
-      message += `  Comment: <i>"${comment}"</i>\n\n`;
     }
 
     // Calculate asset allocation weights
@@ -1008,65 +1064,68 @@ export class TradingAgent extends Agent<Env> {
     const trend = totalPnL >= 0 ? "🟢" : "🔴";
     const sign = totalPnL >= 0 ? "+" : "";
 
-    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💰 <b>Total Wealth</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `💰 <b>Invested Value</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    message += `📈 <b>Net Returns</b>: <b>${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
+    // 3. Send Portfolio Wealth Card & Summary
+    let summaryMsg = `💰 <b>Total Wealth</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    summaryMsg += `💰 <b>Invested Value</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    summaryMsg += `📈 <b>Net Returns</b>: <b>${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
 
-    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `🏆 <b>Top Performer</b>:\n`;
+    summaryMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    summaryMsg += `🏆 <b>Top Performer</b>:\n`;
     if (topPerformer.name) {
       const topSign = topPerformer.pnl >= 0 ? "+" : "";
       const topName = escapeHtml(topPerformer.name);
       const topHouse = escapeHtml(topPerformer.fundHouse);
       const topCode = escapeHtml(topPerformer.schemeCode);
-      message += `• <b>${topName}</b>\n`;
-      message += `  House: <i>${topHouse}</i> | Scheme: <code>${topCode}</code>\n`;
-      message += `  PnL: <b>${topSign}${topPerformer.pnlPct.toFixed(2)}%</b> (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+      summaryMsg += `• <b>${topName}</b>\n`;
+      summaryMsg += `  House: <i>${topHouse}</i> | Scheme: <code>${topCode}</code>\n`;
+      summaryMsg += `  PnL: <b>${topSign}${topPerformer.pnlPct.toFixed(2)}%</b> (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
     } else {
-      message += `• N/A\n\n`;
+      summaryMsg += `• N/A\n\n`;
     }
 
-    message += `📉 <b>Underperformer</b>:\n`;
+    summaryMsg += `📉 <b>Underperformer</b>:\n`;
     if (underPerformer.name && underPerformer.symbol !== topPerformer.symbol) {
       const underSign = underPerformer.pnl >= 0 ? "+" : "";
       const underName = escapeHtml(underPerformer.name);
       const underHouse = escapeHtml(underPerformer.fundHouse);
       const underCode = escapeHtml(underPerformer.schemeCode);
-      message += `• <b>${underName}</b>\n`;
-      message += `  House: <i>${underHouse}</i> | Scheme: <code>${underCode}</code>\n`;
-      message += `  PnL: <b>${underSign}${underPerformer.pnlPct.toFixed(2)}%</b> (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+      summaryMsg += `• <b>${underName}</b>\n`;
+      summaryMsg += `  House: <i>${underHouse}</i> | Scheme: <code>${underCode}</code>\n`;
+      summaryMsg += `  PnL: <b>${underSign}${underPerformer.pnlPct.toFixed(2)}%</b> (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
     } else {
-      message += `• N/A (Single asset portfolio or identical performers)\n\n`;
+      summaryMsg += `• N/A (Single asset portfolio or identical performers)\n\n`;
     }
 
-    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `⚖️ <b>Asset Allocation & Diversification</b>:\n`;
+    summaryMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    summaryMsg += `⚖️ <b>Asset Allocation & Diversification</b>:\n`;
     for (const item of allocationData) {
       const itemName = escapeHtml(item.name);
-      message += `• <b>${itemName}</b>: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
+      summaryMsg += `• <b>${itemName}</b>: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
     }
 
     if (totalPnLPct >= 10) {
-      message += `\n🚀 <b>Analysis</b>: Your Mutual Fund portfolio is performing exceptionally well with strong double-digit growth. Stay invested!`;
+      summaryMsg += `\n🚀 <b>Analysis</b>: Your Mutual Fund portfolio is performing exceptionally well with strong double-digit growth. Stay invested!`;
     } else if (totalPnLPct >= 0) {
-      message += `\n💎 <b>Analysis</b>: Your portfolio has stable positive growth. Excellent asset distribution and long-term momentum.`;
+      summaryMsg += `\n💎 <b>Analysis</b>: Your portfolio has stable positive growth. Excellent asset distribution and long-term momentum.`;
     } else {
-      message += `\n⚠️ <b>Analysis</b>: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
+      summaryMsg += `\n⚠️ <b>Analysis</b>: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
     }
 
-    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
-    message += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
-    message += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
-    message += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
-    message += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.`;
+    await this.sendBotHtmlMessage(summaryMsg);
+
+    // 4. Send Glossary Footer
+    let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
+    footer += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
+    footer += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
+    footer += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
+    footer += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
+    footer += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.`;
 
     if (useMock) {
-      message += `\n\n⚠️ <i>This analysis is based on mock mutual fund holdings.</i>`;
+      footer += `\n\n⚠️ <i>This analysis is based on mock mutual fund holdings.</i>`;
     }
 
-    await this.sendBotHtmlMessage(message);
+    await this.sendBotHtmlMessage(footer);
   }
 
   private getMockHoldings() {
