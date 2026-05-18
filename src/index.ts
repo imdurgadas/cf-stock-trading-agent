@@ -21,6 +21,13 @@ function escapeHtml(text: any): string {
     .replace(/>/g, "&gt;");
 }
 
+// Helper to abbreviate mutual fund names to a readable 12-character string for monospace tables
+function abbreviateName(name: string): string {
+  let clean = name.replace(/(Direct|Plan|Growth|Option|Mutual|Asset|Passive|Index|LargeMidcap|Scheme|Fund|Active|Flexi|Cap|Tax|Saver|Bluechip|ELSS)/gi, "").trim();
+  clean = clean.replace(/\s+/g, " ");
+  return clean.slice(0, 12).trim();
+}
+
 export interface Env {
   TRADING_AGENT: DurableObjectNamespace<TradingAgent>;
   TRADING_WORKFLOW: Workflow;
@@ -58,7 +65,7 @@ export class TradingAgent extends Agent<Env> {
       }
     }
     
-    console.log("[Agent] Initializing Kite SDK...");
+    console.info("[Agent] Initializing Kite SDK...");
     const accessToken = await this.ctx.storage.get<string>("kite_access_token");
     const expiry = await this.ctx.storage.get<number>("kite_token_expiry");
 
@@ -241,7 +248,7 @@ export class TradingAgent extends Agent<Env> {
 
   @callable()
   async logFromWorkflow(msg: string) {
-    console.log(`[Workflow Log] ${msg}`);
+    console.info(`[Workflow Log] ${msg}`);
     return { status: "ok" };
   }
 
@@ -523,17 +530,26 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
-    // 1. Send Header
-    await this.sendBotHtmlMessage(`📊 <b>Kite Equity Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
-
-    let totalInvested = 0;
-    let totalCurrent = 0;
-
     // Filter valid holdings
     const validHoldings = holdings.filter(h => {
       const qty = (h.quantity || 0) + (h.t1_quantity || 0);
       return qty > 0;
     });
+
+    let totalInvested = 0;
+    let totalCurrent = 0;
+
+    // Precalculate totals
+    for (const h of validHoldings) {
+      const qty = (h.quantity || 0) + (h.t1_quantity || 0);
+      const avg = h.average_price || 0;
+      const ltp = h.last_price || 0;
+      totalInvested += qty * avg;
+      totalCurrent += qty * ltp;
+    }
+
+    // 1. Send Header
+    await this.sendBotHtmlMessage(`📊 <b>Kite Equity Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
     // 2. Send Stock Items in chunks of 5
     const CHUNK_SIZE = 5;
@@ -549,9 +565,6 @@ export class TradingAgent extends Agent<Env> {
         const current = qty * ltp;
         const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
         const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
-
-        totalInvested += invested;
-        totalCurrent += current;
 
         const trend = pnl >= 0 ? "🟢" : "🔴";
         const sign = pnl >= 0 ? "+" : "";
@@ -602,13 +615,13 @@ export class TradingAgent extends Agent<Env> {
         const isISIN = cleanName.startsWith("INF") && cleanName.length === 12;
         if (isISIN) {
           try {
-            console.log(`[Enrich] Resolving ISIN ${cleanName} via Stock MCP...`);
+            console.debug(`[Enrich] Resolving ISIN ${cleanName} via Stock MCP...`);
             const searchResults = await this.searchMutualFundsMCP(cleanName);
             if (searchResults && searchResults.length > 0) {
               const bestMatch = searchResults[0];
               schemeCode = bestMatch.scheme_code;
               schemeName = bestMatch.scheme_name;
-              console.log(`[Enrich] Resolved ISIN ${cleanName} to Scheme Code ${schemeCode} ("${schemeName}")`);
+              console.debug(`[Enrich] Resolved ISIN ${cleanName} to Scheme Code ${schemeCode} ("${schemeName}")`);
 
               // Fetch details for fund house
               const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
@@ -695,17 +708,26 @@ export class TradingAgent extends Agent<Env> {
     // Enrich holdings with name, scheme code, and fund house
     const enriched = await this.enrichMFHoldings(holdings);
 
-    // 1. Send Header
-    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
-
-    let totalInvested = 0;
-    let totalCurrent = 0;
-
     // Filter valid holdings
     const validHoldings = enriched.filter(h => {
       const qty = h.quantity || 0;
       return qty > 0;
     });
+
+    let totalInvested = 0;
+    let totalCurrent = 0;
+
+    // Precalculate totals
+    for (const h of validHoldings) {
+      const qty = h.quantity || 0;
+      const avg = h.average_price || 0;
+      const ltp = h.last_price || 0;
+      totalInvested += qty * avg;
+      totalCurrent += qty * ltp;
+    }
+
+    // 1. Send Header
+    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
     // 2. Send MF Items in chunks of 4
     const CHUNK_SIZE = 4;
@@ -721,9 +743,6 @@ export class TradingAgent extends Agent<Env> {
         const current = qty * ltp;
         const pnl = current - invested;
         const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
-
-        totalInvested += invested;
-        totalCurrent += current;
 
         const trend = pnl >= 0 ? "🟢" : "🔴";
         const sign = pnl >= 0 ? "+" : "";
@@ -894,10 +913,10 @@ export class TradingAgent extends Agent<Env> {
     try {
       const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
       
-      // Send the header
-      await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Watchlist Deep Technical Scan</b>\n━━━━━━━━━━━━━━━━━━━━━`);
+      // 1. Send the header
+      await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Watchlist Technical Scan</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
-      // Send mutual fund details in chunks of 3
+      // 2. Send mutual fund details in chunks of 3
       const CHUNK_SIZE = 3;
       for (let i = 0; i < watchlistResults.length; i += CHUNK_SIZE) {
         const chunk = watchlistResults.slice(i, i + CHUNK_SIZE);
@@ -927,14 +946,15 @@ export class TradingAgent extends Agent<Env> {
         await this.sendBotHtmlMessage(chunkMsg);
       }
 
-      // Send the footer (Glossary & Tip)
+      // 3. Send the Glossary & Tip
       let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
       footer += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
       footer += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
-      footer += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
-      footer += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
+      footer += `• <b>Sharpe Ratio</b>: Measures return earned per risk unit. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
+      footer += `• <b>Sortino Ratio</b>: Measures return against bad drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during crashes.\n`;
       footer += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.\n\n`;
-      footer += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>`;
+      footer += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>\n`;
+      footer += `🔍 <i>Type "/mf_search [query]" or "/mf_analyze" to analyze specific funds in detail.</i>`;
 
       await this.sendBotHtmlMessage(footer);
     } catch (err: any) {
@@ -975,7 +995,7 @@ export class TradingAgent extends Agent<Env> {
       let mcpAnalysis = null;
       if (h.schemeCode && h.schemeCode !== "N/A" && typeof h.schemeCode === "number") {
         try {
-          console.log(`[MF Analyze] Running technical analysis for schemeCode ${h.schemeCode} ("${h.name}")...`);
+          console.debug(`[MF Analyze] Running technical analysis for schemeCode ${h.schemeCode} ("${h.name}")...`);
           mcpAnalysis = await this.analyzeMutualFundMCP(h.schemeCode);
         } catch (e: any) {
           console.error(`Failed to analyze mutual fund via MCP for schemeCode ${h.schemeCode}:`, e.message);
@@ -993,8 +1013,33 @@ export class TradingAgent extends Agent<Env> {
     let underPerformer = { name: "", symbol: "", fundHouse: "", schemeCode: "", pnlPct: Infinity, pnl: 0 };
     const allocationData: { name: string; value: number; pct: number }[] = [];
 
+    // Precalculate all values
+    for (const h of analyzed) {
+      const qty = h.quantity || 0;
+      if (qty === 0) continue;
+
+      const avg = h.average_price || 0;
+      const ltp = h.last_price || 0;
+      const invested = qty * avg;
+      const current = qty * ltp;
+      const pnl = current - invested;
+      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+
+      totalInvested += invested;
+      totalCurrent += current;
+
+      if (pnlPct > topPerformer.pnlPct) {
+        topPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
+      }
+      if (pnlPct < underPerformer.pnlPct) {
+        underPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
+      }
+
+      allocationData.push({ name: h.name, value: current, pct: 0 });
+    }
+
     // 1. Send Header
-    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Portfolio Health Card</b>\n━━━━━━━━━━━━━━━━━━━━━`);
+    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Portfolio Health Scan</b>\n━━━━━━━━━━━━━━━━━━━━━`);
 
     // 2. Send Individual Fund Technical Scan Cards in Chunks of 3
     const CHUNK_SIZE = 3;
@@ -1005,25 +1050,6 @@ export class TradingAgent extends Agent<Env> {
       for (const h of chunk) {
         const qty = h.quantity || 0;
         if (qty === 0) continue;
-
-        const avg = h.average_price || 0;
-        const ltp = h.last_price || 0;
-        const invested = qty * avg;
-        const current = qty * ltp;
-        const pnl = current - invested;
-        const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
-
-        totalInvested += invested;
-        totalCurrent += current;
-
-        if (pnlPct > topPerformer.pnlPct) {
-          topPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
-        }
-        if (pnlPct < underPerformer.pnlPct) {
-          underPerformer = { name: h.name, symbol: h.tradingsymbol, fundHouse: h.fundHouse, schemeCode: String(h.schemeCode), pnlPct, pnl };
-        }
-
-        allocationData.push({ name: h.name, value: current, pct: 0 });
 
         const mcp = h.mcpAnalysis;
         const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
@@ -1184,28 +1210,28 @@ export class TradingAgent extends Agent<Env> {
 
   private async sendBotMessage(text: string) {
     const { sendTelegramMessage } = await import("./notifications");
-    console.log("[Telegram] Sending message:", text);
+    console.debug("[Telegram] Sending message:", text);
     await sendTelegramMessage(text, {
       botToken: this.env.TELEGRAM_BOT_TOKEN,
       chatId: this.env.TELEGRAM_CHAT_ID
     });
-    console.log("[Telegram] Message sent successfully.");
+    console.debug("[Telegram] Message sent successfully.");
   }
 
   private async sendBotHtmlMessage(text: string) {
     const { sendTelegramMessage } = await import("./notifications");
-    console.log("[Telegram] Sending HTML message:", text);
+    console.debug("[Telegram] Sending HTML message:", text);
     await sendTelegramMessage(text, {
       botToken: this.env.TELEGRAM_BOT_TOKEN,
       chatId: this.env.TELEGRAM_CHAT_ID,
       parseMode: "HTML"
     });
-    console.log("[Telegram] HTML Message sent successfully.");
+    console.debug("[Telegram] HTML Message sent successfully.");
   }
 
   @callable()
   async handleKitePostback(data: any) {
-    console.log("Kite Postback Received:", data);
+    console.info("Kite Postback Received:", data);
     // You could send a Telegram message here for important updates
     return { status: "received" };
   }
