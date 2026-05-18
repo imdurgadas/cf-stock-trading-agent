@@ -837,14 +837,19 @@ export class TradingAgent extends Agent<Env> {
 
         message += `• *${mcp?.meta?.scheme_name || "Unknown Fund"}*\n`;
         message += `  House: _${mcp?.meta?.fund_house || "N/A"}_ | Scheme: \`${mcp?.meta?.scheme_code}\`\n`;
-        message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}*\n`;
-        message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}*\n`;
-        message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}*\n`;
+        message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}* _(Ideal: >12%)_\n`;
+        message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* _(Ideal: >1.0)_ | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}* _(Ideal: >1.5)_\n`;
+        message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}* _(Ideal: <15% for stability)_\n`;
         message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
         message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
       }
 
       message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      message += `📊 *Indicator Glossary (Easy Words)*:\n`;
+      message += `• *CAGR*: The average annual growth rate. Higher means your money grows faster. Ideal is >12%.\n`;
+      message += `• *Sharpe Ratio*: Measures return earned per unit of risk. *Ideal >1.0*. Higher means the fund manager is smart at taking calculated risks.\n`;
+      message += `• *Sortino Ratio*: Measures return against *only bad/downside* drops. *Ideal >1.5*. Higher means the fund protects you best during market crashes.\n`;
+      message += `• *Volatility*: Fluctuation scale. *Ideal <15%*. Lower means a smoother, less stressful investment ride.\n\n`;
       message += `💡 _Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth._`;
       
       await this.sendBotMessage(message);
@@ -939,9 +944,9 @@ export class TradingAgent extends Agent<Env> {
 
       message += `• *${h.name}*\n`;
       message += `  House: _${h.fundHouse}_ | Scheme: \`${h.schemeCode}\`\n`;
-      message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}*\n`;
-      message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}*\n`;
-      message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}*\n`;
+      message += `  Returns: 1Y CAGR: *${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr + "%" : "N/A"}* | 3Y CAGR: *${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr + "%" : "N/A"}* _(Ideal: >12%)_\n`;
+      message += `  Risk Metrics: Sharpe: *${mcp?.risk_metrics?.sharpe_ratio ?? "N/A"}* _(Ideal: >1.0)_ | Sortino: *${mcp?.risk_metrics?.sortino_ratio ?? "N/A"}* _(Ideal: >1.5)_\n`;
+      message += `  Volatility: *${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct + "%" : "N/A"}* _(Ideal: <15% for stability)_\n`;
       message += `  Grade: ${gradeIcon} *${mcp?.evaluation?.grade || "N/A"}*\n`;
       message += `  Comment: _"${mcp?.evaluation?.comment || "No historical analysis available."}"_\n\n`;
     }
@@ -998,6 +1003,13 @@ export class TradingAgent extends Agent<Env> {
     } else {
       message += `\n⚠️ *Analysis*: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
     }
+
+    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `📊 *Indicator Glossary (Easy Words)*:\n`;
+    message += `• *CAGR*: The average annual growth rate. Higher means your money grows faster. Ideal is >12%.\n`;
+    message += `• *Sharpe Ratio*: Measures return earned per unit of risk. *Ideal >1.0*. Higher means the fund manager is smart at taking calculated risks.\n`;
+    message += `• *Sortino Ratio*: Measures return against *only bad/downside* drops. *Ideal >1.5*. Higher means the fund protects you best during market crashes.\n`;
+    message += `• *Volatility*: Fluctuation scale. *Ideal <15%*. Lower means a smoother, less stressful investment ride.`;
 
     if (useMock) {
       message += `\n\n⚠️ _This analysis is based on mock mutual fund holdings._`;
