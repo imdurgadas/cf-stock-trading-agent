@@ -105,12 +105,14 @@ To display a command suggestion menu when you type `/` in the chat, register the
 3. Choose your trading bot from the list.
 4. Copy and paste the list below:
    ```text
-   login - Generate secure Zerodha Kite Connect login link
-   holdings - View active NSE equity and ETF holdings
-   mf - View mutual fund holdings with live NAVs
-   analyze - Run stock-mcp technical analysis on holding symbols
-   trade - View pending trade scan or trigger custom orders
-   ```
+    login - Generate secure Zerodha Kite Connect login link
+    holdings - View active NSE equity and ETF holdings
+    mf - View mutual fund holdings with live NAVs
+    analyze - Run daily sector watchlists technical analysis scans (No Kite session required)
+    analyze_holdings - Run stock-mcp technical analysis on NSE holdings (Kite session required)
+    analyze_mf - Run mutual fund portfolio health & asset diversification analysis
+    trade - View pending trade scan or trigger custom orders
+    ```
 5. Send. The menu will immediately populate in your chat window.
 
 ### 2. Available Commands Reference
@@ -122,7 +124,9 @@ The bot supports natural language command patterns, alongside standard slash com
 | `kite login` | `login` / `/login` | N/A | Generates a 10-minute secure authorization link to Zerodha Kite. |
 | `get kite holdings` | `holdings` / `/holdings` | `mock holdings` | Fetches active equity/ETF holdings, formats P&L status, and prints totals. |
 | `get mutual fund holdings` | `mf` / `mf holdings` / `/mf` | `mock mf` | Fetches active mutual fund holdings, average costs, current NAVs, and returns. |
-| `do analysis` | `analyze` / `analyze holdings` / `/analyze` | `mock analyze` | Extracts holding symbols, maps them to NSE formats (`.NS`), and runs High-Conviction technical indicators. |
+| `analyze` | `do analysis` / `/analyze` / `watchlist analysis` | N/A | **Watchlist Scan**: Runs daily sector watchlist technical analysis scans. **No Kite session required!** |
+| `analyze_kite_holdings` | `analyze holdings` / `/analyze_holdings` / `/analyze_kite_holdings` | `mock analyze` | **Equity Holdings Scan**: Extracts holding symbols, maps them to NSE (`.NS`), and runs stock-mcp High-Conviction scans. |
+| `analyze_mf` | `analyze mf` / `/analyze_mf` / `/mf_analysis` | `mock analyze mf` | **MF Health Card**: Evaluates mutual fund returns, top/under-performers, and asset allocation percentage weights. |
 | `trade <amount>` | `trade <symbol> <amount>` | N/A | Starts an order flow scan or targets a specific stock to buy (e.g. `trade INFY 5000`). |
 
 ---

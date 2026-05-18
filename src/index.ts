@@ -332,18 +332,44 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
-    // 4. Command: Do Technical Analysis of Holdings (Live or Mock)
+    // 4. Command: Do Watchlist Technical Analysis (No Kite Session Required!)
     if (
-      text === "do analysis of the same using our method" ||
-      text === "do analysis of the same" ||
       text === "do analysis" ||
-      text === "analyze holdings" ||
       text === "analyze" ||
       text === "/analyze" ||
+      text === "analyze watchlists" ||
+      text === "watchlist analysis"
+    ) {
+      await this.sendBotMessage("🔍 *Watchlist Analysis Started*\nTriggering sector watchlists technical analysis scans...");
+      await this.startWatchlistAnalysis();
+      return;
+    }
+
+    // 5. Command: Do Technical Analysis of Kite Holdings (Kite Session Required)
+    if (
+      text === "analyze holdings" ||
+      text === "analyze_holdings" ||
+      text === "analyze_kite_holdings" ||
+      text === "/analyze_holdings" ||
+      text === "/analyze_kite_holdings" ||
+      text === "mock analyze holdings" ||
       text === "mock analyze"
     ) {
       const useMock = text.includes("mock");
       await this.handleAnalyzeHoldings(useMock);
+      return;
+    }
+
+    // 6. Command: Do Mutual Fund Portfolio Diversification Analysis (Live or Mock)
+    if (
+      text === "analyze mf" ||
+      text === "analyze_mf" ||
+      text === "/analyze_mf" ||
+      text === "/mf_analysis" ||
+      text === "mock analyze mf"
+    ) {
+      const useMock = text.includes("mock");
+      await this.handleAnalyzeMFHoldings(useMock);
       return;
     }
 
@@ -632,6 +658,117 @@ export class TradingAgent extends Agent<Env> {
       console.error("Holdings analysis failed:", err.message);
       await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
     }
+  }
+
+  private async handleAnalyzeMFHoldings(useMock: boolean) {
+    let holdings: any[] = [];
+    if (useMock) {
+      holdings = this.getMockMFHoldings();
+    } else {
+      try {
+        holdings = await this.getMutualFundHoldings();
+      } catch (err: any) {
+        console.error("Failed to fetch MF holdings for analysis:", err.message);
+        const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
+        await this.sendBotMessage(`⚠️ *Kite Session Expired/Disconnected*\n\nCould not fetch mutual fund holdings to analyze. Please login first:\n🔗 [Login to Kite](${loginUrl})\n\n💡 _Or type "mock analyze mf" to see a demo._`);
+        return;
+      }
+    }
+
+    if (!holdings || holdings.length === 0) {
+      await this.sendBotMessage("📭 No mutual fund holdings found to analyze.");
+      return;
+    }
+
+    await this.sendBotMessage(`🔍 *Mutual Fund Portfolio Analysis Started*...`);
+
+    let totalInvested = 0;
+    let totalCurrent = 0;
+    let topPerformer = { symbol: "", pnlPct: -Infinity, pnl: 0 };
+    let underPerformer = { symbol: "", pnlPct: Infinity, pnl: 0 };
+    const allocationData: { symbol: string; value: number; pct: number }[] = [];
+
+    for (const h of holdings) {
+      const qty = h.quantity || 0;
+      if (qty === 0) continue;
+
+      const avg = h.average_price || 0;
+      const ltp = h.last_price || 0;
+      const invested = qty * avg;
+      const current = qty * ltp;
+      const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
+      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+
+      totalInvested += invested;
+      totalCurrent += current;
+
+      if (pnlPct > topPerformer.pnlPct) {
+        topPerformer = { symbol: h.tradingsymbol, pnlPct, pnl };
+      }
+      if (pnlPct < underPerformer.pnlPct) {
+        underPerformer = { symbol: h.tradingsymbol, pnlPct, pnl };
+      }
+
+      allocationData.push({ symbol: h.tradingsymbol, value: current, pct: 0 });
+    }
+
+    // Calculate asset allocation weights
+    if (totalCurrent > 0) {
+      for (const item of allocationData) {
+        item.pct = (item.value / totalCurrent) * 100;
+      }
+    }
+    allocationData.sort((a, b) => b.pct - a.pct);
+
+    const totalPnL = totalCurrent - totalInvested;
+    const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+    const trend = totalPnL >= 0 ? "🟢" : "🔴";
+    const sign = totalPnL >= 0 ? "+" : "";
+
+    let message = `🌾 *Mutual Fund Portfolio Health Card*\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    message += `💰 *Total Wealth*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `💰 *Invested Value*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📈 *Net Returns*: *${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
+
+    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `🏆 *Top Performer*:\n`;
+    if (topPerformer.symbol) {
+      const topSign = topPerformer.pnl >= 0 ? "+" : "";
+      message += `• *${topPerformer.symbol}*\n`;
+      message += `  PnL: *${topSign}${topPerformer.pnlPct.toFixed(2)}%* (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+    } else {
+      message += `• N/A\n\n`;
+    }
+
+    message += `📉 *Underperformer*:\n`;
+    if (underPerformer.symbol && underPerformer.symbol !== topPerformer.symbol) {
+      const underSign = underPerformer.pnl >= 0 ? "+" : "";
+      message += `• *${underPerformer.symbol}*\n`;
+      message += `  PnL: *${underSign}${underPerformer.pnlPct.toFixed(2)}%* (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
+    } else {
+      message += `• N/A (Single asset portfolio or identical performers)\n\n`;
+    }
+
+    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `⚖️ *Asset Allocation & Diversification*:\n`;
+    for (const item of allocationData) {
+      message += `• *${item.symbol}*: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
+    }
+
+    if (totalPnLPct >= 10) {
+      message += `\n🚀 *Analysis*: Your Mutual Fund portfolio is performing exceptionally well with strong double-digit growth. Stay invested!`;
+    } else if (totalPnLPct >= 0) {
+      message += `\n💎 *Analysis*: Your portfolio has stable positive growth. Excellent asset distribution and long-term momentum.`;
+    } else {
+      message += `\n⚠️ *Analysis*: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
+    }
+
+    if (useMock) {
+      message += `\n\n⚠️ _This analysis is based on mock mutual fund holdings._`;
+    }
+
+    await this.sendBotMessage(message);
   }
 
   private getMockHoldings() {
