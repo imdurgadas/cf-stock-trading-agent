@@ -117,8 +117,9 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
     // 2. Format & Send Telegram Message
     await step.do("send-telegram-report", async () => {
       let message = `📊 *Watchlist Analysis Report*\n\n`;
-      let uptrendCount = 0;
-      let opportunityCount = 0;
+      const buyOpportunities: string[] = [];
+      const strongRising: string[] = [];
+      const bearishWeak: string[] = [];
 
       for (const stock of analysis) {
         const trend = stock.is_st_green ? "🟢" : "🔴";
@@ -126,31 +127,49 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
         const isDip = stock.fall_pct <= -2;
 
         if (isBullish) {
-          if (isDip) opportunityCount++;
-          else uptrendCount++;
+          if (isDip) {
+            buyOpportunities.push(stock.symbol);
+          } else {
+            strongRising.push(stock.symbol);
+          }
+        } else {
+          bearishWeak.push(stock.symbol);
         }
 
         message += `*${stock.symbol}* ${trend}\n`;
-        message += `Price: ₹${stock.ltp} (${stock.fall_pct}%)\n`;
-        message += `RSI: ${stock.rsi.toFixed(1)}\n`;
-        message += `EMA20: ${stock.price_above_ema20 ? "✅" : "❌"} | EMA50: ${stock.price_above_ema50 ? "✅" : "❌"}\n`;
-        message += `SuperTrend: ${stock.is_st_green ? "Bullish" : "Bearish"}\n\n`;
+        message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
+        message += `• RSI: ${stock.rsi.toFixed(1)} | ADX: ${stock.adx.toFixed(1)}${stock.adx >= 25 ? " 🔥" : ""}\n`;
+        message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
+        message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
+        message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
+        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
+        message += `• Recommendation: *${stock.recommendation}*\n`;
+        message += `• Analysis: _${stock.comment}_\n\n`;
       }
 
-      // Add Summary
+      // Add Summary with explicit stock symbols listed
       message += `━━━━━━━━━━━━━━━\n`;
       message += `📈 *Market Sentiment Summary*:\n`;
-      message += `• *Strong & Rising*: ${uptrendCount} (Bullish trend, but no -2% dip)\n`;
-      message += `• *Buy Opportunities*: ${opportunityCount} (Bullish trend + -2% Dip met)\n`;
-      message += `• *Bearish/Weak*: ${analysis.length - uptrendCount - opportunityCount} (Below EMAs or ST Red)\n\n`;
+      message += `• *Buy Opportunities* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+      message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+      message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
 
-      if (opportunityCount > 0) {
-        message += `🚀 *Action*: Found ${opportunityCount} dip opportunities! Check the Trading Workflow.`;
-      } else if (uptrendCount > 0) {
+      if (buyOpportunities.length > 0) {
+        message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Check the Trading Workflow.`;
+      } else if (strongRising.length > 0) {
         message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
       } else {
         message += `⚠️ *Action*: Market looks weak. Stay cautious.`;
       }
+
+      // Add Parameter Guide/Glossary
+      message += `\n\n📖 *Technical Parameter Guide*:\n`;
+      message += `• *RSI*: Relative Strength Index (<30 is Oversold/Deep Value; >70 is Overbought/Avoid).\n`;
+      message += `• *ADX*: Average Directional Index (>25 indicates a strong, sustainable trend).\n`;
+      message += `• *EMA20/50*: Exponential Moving Averages (Bullish if price > both). Bullish crossover signals key trend reversal.\n`;
+      message += `• *MACD*: Moving Average Convergence Divergence (Bullish signals strong upward momentum).\n`;
+      message += `• *BB Lower*: Bollinger Bands. Near lower band indicates a short-term oversold/mean-reversion entry point.\n`;
+      message += `• *Volume Surge*: Trading volume > 1.5x of 20-day SMA, indicating institutional backing.`;
 
       await sendTelegramMessage(message, {
         botToken: env.TELEGRAM_BOT_TOKEN,

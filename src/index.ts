@@ -365,11 +365,11 @@ export default {
     const agent = await env.TRADING_AGENT.get(env.TRADING_AGENT.idFromName("default"));
 
     // 2:45 PM IST (9:15 AM UTC) -> Watchlist Analysis
-    if (event.cron === "15 9 * * *") {
+    if (event.cron === "15 9 * * MON-FRI" || event.cron === "15 9 * * *") {
       await agent.startWatchlistAnalysis();
     } 
     // 3:10 PM IST (9:40 AM UTC) -> Trading Workflow
-    else if (event.cron === "40 9 * * *") {
+    else if (event.cron === "40 9 * * MON-FRI" || event.cron === "40 9 * * *") {
       await agent.startTradingWorkflow(1000);
     }
     // Fallback for manual triggers

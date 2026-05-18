@@ -40,8 +40,8 @@
 	],
 	"triggers": {
 		"crons": [
-			"40 9 * * *",
-			"15 9 * * *"
+			"40 9 * * MON-FRI",
+			"15 9 * * MON-FRI"
 		]
 	},
 	"migrations": [
