@@ -552,26 +552,60 @@ export class TradingAgent extends Agent<Env> {
   }
 
   private async enrichMFHoldings(holdings: any[]): Promise<any[]> {
-    return Promise.all(
-      holdings.map(async (h) => {
-        const queryName = h.name || h.tradingsymbol || "";
-        const cleanName = queryName.replace(/_/g, " ").trim();
-        
-        let schemeCode = null;
-        let schemeName = h.name || cleanName;
-        let fundHouse = "Unknown Fund House";
+    const results: any[] = [];
+    for (const h of holdings) {
+      const queryName = h.name || h.tradingsymbol || "";
+      const cleanName = queryName.replace(/_/g, " ").trim();
+      
+      let schemeCode = null;
+      let schemeName = h.name || cleanName;
+      let fundHouse = "Unknown Fund House";
 
-        if (cleanName.length > 0) {
-          const isISIN = cleanName.startsWith("INF") && cleanName.length === 12;
-          if (isISIN) {
-            try {
-              console.log(`[Enrich] Resolving ISIN ${cleanName} via Stock MCP...`);
-              const searchResults = await this.searchMutualFundsMCP(cleanName);
-              if (searchResults && searchResults.length > 0) {
-                const bestMatch = searchResults[0];
-                schemeCode = bestMatch.scheme_code;
-                schemeName = bestMatch.scheme_name;
-                console.log(`[Enrich] Resolved ISIN ${cleanName} to Scheme Code ${schemeCode} ("${schemeName}")`);
+      if (cleanName.length > 0) {
+        const isISIN = cleanName.startsWith("INF") && cleanName.length === 12;
+        if (isISIN) {
+          try {
+            console.log(`[Enrich] Resolving ISIN ${cleanName} via Stock MCP...`);
+            const searchResults = await this.searchMutualFundsMCP(cleanName);
+            if (searchResults && searchResults.length > 0) {
+              const bestMatch = searchResults[0];
+              schemeCode = bestMatch.scheme_code;
+              schemeName = bestMatch.scheme_name;
+              console.log(`[Enrich] Resolved ISIN ${cleanName} to Scheme Code ${schemeCode} ("${schemeName}")`);
+
+              // Fetch details for fund house
+              const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
+              if (detailsRes.ok) {
+                const detailsJson = await detailsRes.json() as any;
+                if (detailsJson.meta) {
+                  fundHouse = detailsJson.meta.fund_house || "Unknown Fund House";
+                }
+              }
+            }
+          } catch (err: any) {
+            console.error(`[Enrich] Failed to resolve ISIN ${cleanName} via MCP:`, err.message);
+          }
+        }
+
+        // Fallback if ISIN resolution failed or wasn't an ISIN
+        if (!schemeCode) {
+          try {
+            const searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanName)}`);
+            if (searchRes.ok) {
+              const searchJson = await searchRes.json() as any[];
+              if (searchJson && searchJson.length > 0) {
+                // Find the best match containing Direct and Growth
+                let bestMatch = searchJson[0];
+                for (const match of searchJson) {
+                  const matchLower = match.schemeName.toLowerCase();
+                  if (matchLower.includes("direct") && matchLower.includes("growth")) {
+                    bestMatch = match;
+                    break;
+                  }
+                }
+                
+                schemeCode = bestMatch.schemeCode;
+                schemeName = bestMatch.schemeName;
 
                 // Fetch details for fund house
                 const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
@@ -582,55 +616,21 @@ export class TradingAgent extends Agent<Env> {
                   }
                 }
               }
-            } catch (err: any) {
-              console.error(`[Enrich] Failed to resolve ISIN ${cleanName} via MCP:`, err.message);
             }
-          }
-
-          // Fallback if ISIN resolution failed or wasn't an ISIN
-          if (!schemeCode) {
-            try {
-              const searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanName)}`);
-              if (searchRes.ok) {
-                const searchJson = await searchRes.json() as any[];
-                if (searchJson && searchJson.length > 0) {
-                  // Find the best match containing Direct and Growth
-                  let bestMatch = searchJson[0];
-                  for (const match of searchJson) {
-                    const matchLower = match.schemeName.toLowerCase();
-                    if (matchLower.includes("direct") && matchLower.includes("growth")) {
-                      bestMatch = match;
-                      break;
-                    }
-                  }
-                  
-                  schemeCode = bestMatch.schemeCode;
-                  schemeName = bestMatch.schemeName;
-
-                  // Fetch details for fund house
-                  const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
-                  if (detailsRes.ok) {
-                    const detailsJson = await detailsRes.json() as any;
-                    if (detailsJson.meta) {
-                      fundHouse = detailsJson.meta.fund_house || "Unknown Fund House";
-                    }
-                  }
-                }
-              }
-            } catch (e) {
-              console.error(`Error enriching MF holding ${queryName}:`, e);
-            }
+          } catch (e) {
+            console.error(`Error enriching MF holding ${queryName}:`, e);
           }
         }
+      }
 
-        return {
-          ...h,
-          name: schemeName,
-          schemeCode: schemeCode || "N/A",
-          fundHouse
-        };
-      })
-    );
+      results.push({
+        ...h,
+        name: schemeName,
+        schemeCode: schemeCode || "N/A",
+        fundHouse
+      });
+    }
+    return results;
   }
 
   private async handleGetMFHoldings(useMock: boolean) {
@@ -885,23 +885,23 @@ export class TradingAgent extends Agent<Env> {
     // Enrich holdings with name, scheme code, and fund house
     const enriched = await this.enrichMFHoldings(holdings);
 
-    // Call MCP Server tool in parallel for all holdings with a valid schemeCode
-    const analyzed = await Promise.all(
-      enriched.map(async (h) => {
-        let mcpAnalysis = null;
-        if (h.schemeCode && h.schemeCode !== "N/A" && typeof h.schemeCode === "number") {
-          try {
-            mcpAnalysis = await this.analyzeMutualFundMCP(h.schemeCode);
-          } catch (e) {
-            console.error(`Failed to analyze mutual fund via MCP for schemeCode ${h.schemeCode}:`, e);
-          }
+    // Call MCP Server tool sequentially for all holdings with a valid schemeCode to prevent memory spikes
+    const analyzed = [];
+    for (const h of enriched) {
+      let mcpAnalysis = null;
+      if (h.schemeCode && h.schemeCode !== "N/A" && typeof h.schemeCode === "number") {
+        try {
+          console.log(`[MF Analyze] Running technical analysis for schemeCode ${h.schemeCode} ("${h.name}")...`);
+          mcpAnalysis = await this.analyzeMutualFundMCP(h.schemeCode);
+        } catch (e: any) {
+          console.error(`Failed to analyze mutual fund via MCP for schemeCode ${h.schemeCode}:`, e.message);
         }
-        return {
-          ...h,
-          mcpAnalysis
-        };
-      })
-    );
+      }
+      analyzed.push({
+        ...h,
+        mcpAnalysis
+      });
+    }
 
     let totalInvested = 0;
     let totalCurrent = 0;
