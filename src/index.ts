@@ -246,6 +246,24 @@ export class TradingAgent extends Agent<Env> {
     return await this.runWorkflow("TRADING_WORKFLOW", { amount, mock });
   }
 
+  @callable()
+  async getKiteHoldings() {
+    const kite = await this.initKite();
+    if (!kite.access_token) {
+      throw new Error("Kite session expired or disconnected. Please login first.");
+    }
+    return await kite.getHoldings();
+  }
+
+  @callable()
+  async getMutualFundHoldings() {
+    const kite = await this.initKite();
+    if (!kite.access_token) {
+      throw new Error("Kite session expired or disconnected. Please login first.");
+    }
+    return await kite.getMFHoldings();
+  }
+
   async getAvailableBalance(): Promise<string> {
     const isMock = await this.ctx.storage.get<boolean>("current_run_mock");
     if (isMock) {
@@ -274,12 +292,62 @@ export class TradingAgent extends Agent<Env> {
 
   @callable()
   async handleTelegramUpdate(update: any) {
-    const text = update.message?.text?.toLowerCase();
+    const text = update.message?.text?.toLowerCase()?.trim();
     const chatId = update.message?.chat?.id;
 
     if (!text || String(chatId) !== String(this.env.TELEGRAM_CHAT_ID)) return;
 
-    // 1. Handle "trade <symbol> <amount>" or "trade <amount>"
+    // 1. Command: Kite Login
+    if (text === "kite login" || text === "login" || text === "/login") {
+      const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
+      await this.sendBotMessage(`🔗 *Kite Login*: [Click here to login and authenticate](${loginUrl})\n\n💡 _Note: Sessions expire in 10 minutes for security._`);
+      return;
+    }
+
+    // 2. Command: Get Kite Equity Holdings (Live or Mock)
+    if (
+      text === "get kite holdings" ||
+      text === "kite holdings" ||
+      text === "holdings" ||
+      text === "/holdings" ||
+      text === "mock holdings"
+    ) {
+      const useMock = text.includes("mock");
+      await this.handleGetKiteHoldings(useMock);
+      return;
+    }
+
+    // 3. Command: Get Mutual Fund Holdings (Live or Mock)
+    if (
+      text === "get mutual fund holdings" ||
+      text === "mutual fund holdings" ||
+      text === "get mf holdings" ||
+      text === "mf holdings" ||
+      text === "mf" ||
+      text === "/mf" ||
+      text === "mock mf"
+    ) {
+      const useMock = text.includes("mock");
+      await this.handleGetMFHoldings(useMock);
+      return;
+    }
+
+    // 4. Command: Do Technical Analysis of Holdings (Live or Mock)
+    if (
+      text === "do analysis of the same using our method" ||
+      text === "do analysis of the same" ||
+      text === "do analysis" ||
+      text === "analyze holdings" ||
+      text === "analyze" ||
+      text === "/analyze" ||
+      text === "mock analyze"
+    ) {
+      const useMock = text.includes("mock");
+      await this.handleAnalyzeHoldings(useMock);
+      return;
+    }
+
+    // 5. Handle "trade <symbol> <amount>" or "trade <amount>"
     const tradeSymbolMatch = text.match(/^trade\s+([a-zA-Z0-9\.\-_]+)\s+(\d+)$/);
     const tradeAmountMatch = text.match(/^trade\s+(\d+)$/);
 
@@ -310,7 +378,7 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
-    // 2. Handle "yes" confirmation
+    // 6. Handle "yes" confirmation
     if (text === "yes") {
       const amount = await this.ctx.storage.get<number>("pending_amount");
       const workflowId = await this.ctx.storage.get<string>("pending_workflow_id");
@@ -327,13 +395,295 @@ export class TradingAgent extends Agent<Env> {
       return;
     }
 
-    // 3. Handle "no" cancellation
+    // 7. Handle "no" cancellation
     if (text === "no") {
       await this.ctx.storage.delete("pending_amount");
       await this.ctx.storage.delete("pending_symbol");
       await this.sendBotMessage("❌ Trade cancelled.");
       return;
     }
+  }
+
+  private async handleGetKiteHoldings(useMock: boolean) {
+    let holdings: any[] = [];
+    if (useMock) {
+      holdings = this.getMockHoldings();
+    } else {
+      try {
+        holdings = await this.getKiteHoldings();
+      } catch (err: any) {
+        console.error("Failed to fetch holdings:", err.message);
+        const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
+        await this.sendBotMessage(`⚠️ *Kite Session Expired/Disconnected*\n\nCould not fetch holdings. Please login first:\n🔗 [Login to Kite](${loginUrl})\n\n💡 _Or type "mock holdings" to see a demo._`);
+        return;
+      }
+    }
+
+    if (!holdings || holdings.length === 0) {
+      await this.sendBotMessage("📭 Your Kite account has no active equity holdings.");
+      return;
+    }
+
+    let message = `📊 *Kite Equity Holdings*\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    let totalInvested = 0;
+    let totalCurrent = 0;
+
+    for (const h of holdings) {
+      const qty = (h.quantity || 0) + (h.t1_quantity || 0);
+      if (qty === 0) continue;
+
+      const avg = h.average_price || 0;
+      const ltp = h.last_price || 0;
+      const invested = qty * avg;
+      const current = qty * ltp;
+      const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
+      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+
+      totalInvested += invested;
+      totalCurrent += current;
+
+      const trend = pnl >= 0 ? "🟢" : "🔴";
+      const sign = pnl >= 0 ? "+" : "";
+
+      message += `• *${h.tradingsymbol}* (${h.exchange || "NSE"})\n`;
+      message += `  Qty: ${qty} | Avg: ₹${avg.toFixed(2)}\n`;
+      message += `  LTP: ₹${ltp.toFixed(2)} | Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      message += `  P&L: *${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+    }
+
+    const totalPnL = totalCurrent - totalInvested;
+    const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+    const totalTrend = totalPnL >= 0 ? "🟢" : "🔴";
+    const totalSign = totalPnL >= 0 ? "+" : "";
+
+    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `💰 *Total Invested*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📈 *Current Value*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📊 *Total P&L*: *${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${totalSign}${totalPnLPct.toFixed(2)}%)\n`;
+    
+    if (useMock) {
+      message += `\n⚠️ _This is a Mock Account demo._`;
+    }
+
+    await this.sendBotMessage(message);
+  }
+
+  private async handleGetMFHoldings(useMock: boolean) {
+    let holdings: any[] = [];
+    if (useMock) {
+      holdings = this.getMockMFHoldings();
+    } else {
+      try {
+        holdings = await this.getMutualFundHoldings();
+      } catch (err: any) {
+        console.error("Failed to fetch MF holdings:", err.message);
+        const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
+        await this.sendBotMessage(`⚠️ *Kite Session Expired/Disconnected*\n\nCould not fetch mutual fund holdings. Please login first:\n🔗 [Login to Kite](${loginUrl})\n\n💡 _Or type "mock mf" to see a demo._`);
+        return;
+      }
+    }
+
+    if (!holdings || holdings.length === 0) {
+      await this.sendBotMessage("📭 Your Kite account has no active mutual fund holdings.");
+      return;
+    }
+
+    let message = `🌾 *Mutual Fund Holdings*\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    let totalInvested = 0;
+    let totalCurrent = 0;
+
+    for (const h of holdings) {
+      const qty = h.quantity || 0;
+      if (qty === 0) continue;
+
+      const avg = h.average_price || 0;
+      const ltp = h.last_price || 0; // last NAV
+      const invested = qty * avg;
+      const current = qty * ltp;
+      const pnl = h.pnl !== undefined ? h.pnl : (current - invested);
+      const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+
+      totalInvested += invested;
+      totalCurrent += current;
+
+      const trend = pnl >= 0 ? "🟢" : "🔴";
+      const sign = pnl >= 0 ? "+" : "";
+
+      message += `• *${h.tradingsymbol}* (ISIN: ${h.isin || "N/A"})\n`;
+      message += `  Units: ${qty.toFixed(3)} | Avg NAV: ₹${avg.toFixed(4)}\n`;
+      message += `  Last NAV: ₹${ltp.toFixed(4)} | Val: ₹${current.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      message += `  P&L: *${trend} ${sign}₹${pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${sign}${pnlPct.toFixed(2)}%)\n\n`;
+    }
+
+    const totalPnL = totalCurrent - totalInvested;
+    const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+    const totalTrend = totalPnL >= 0 ? "🟢" : "🔴";
+    const totalSign = totalPnL >= 0 ? "+" : "";
+
+    message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `💰 *Total MF Invested*: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📈 *Current MF Value*: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+    message += `📊 *Total MF P&L*: *${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}* (${totalSign}${totalPnLPct.toFixed(2)}%)\n`;
+
+    if (useMock) {
+      message += `\n⚠️ _This is a Mock Account demo._`;
+    }
+
+    await this.sendBotMessage(message);
+  }
+
+  private async handleAnalyzeHoldings(useMock: boolean) {
+    let holdings: any[] = [];
+    if (useMock) {
+      holdings = this.getMockHoldings();
+    } else {
+      try {
+        holdings = await this.getKiteHoldings();
+      } catch (err: any) {
+        console.error("Failed to fetch holdings for analysis:", err.message);
+        const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
+        await this.sendBotMessage(`⚠️ *Kite Session Expired/Disconnected*\n\nCould not fetch holdings to analyze. Please login first:\n🔗 [Login to Kite](${loginUrl})\n\n💡 _Or type "mock analyze" to see a demo._`);
+        return;
+      }
+    }
+
+    if (!holdings || holdings.length === 0) {
+      await this.sendBotMessage("📭 No holdings found to analyze.");
+      return;
+    }
+
+    // Extract unique symbols and append .NS
+    const symbols = holdings
+      .map(h => h.tradingsymbol)
+      .filter(sym => sym && !sym.startsWith("MOCK"))
+      .map(sym => `${sym.toUpperCase()}.NS`);
+
+    const uniqueSymbols = Array.from(new Set(symbols));
+
+    if (uniqueSymbols.length === 0) {
+      await this.sendBotMessage("📭 No NSE-listed equity holdings found to analyze.");
+      return;
+    }
+
+    await this.sendBotMessage(`🔍 *Holdings Analysis Started*\nAnalyzing ${uniqueSymbols.length} holding(s) using our High-Conviction Technical Analysis strategy...`);
+
+    try {
+      const analysis = await this.getWatchlistAnalysis(uniqueSymbols);
+      if (!analysis || analysis.length === 0) {
+        await this.sendBotMessage("❌ Could not retrieve analysis metrics from the stock MCP server.");
+        return;
+      }
+
+      let message = `🔍 *Holdings Technical Analysis*\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      const buyOpportunities: string[] = [];
+      const strongRising: string[] = [];
+      const bearishWeak: string[] = [];
+
+      for (const stock of analysis) {
+        const trend = stock.is_st_green ? "🟢" : "🔴";
+        const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
+        const isDip = stock.fall_pct <= -2;
+
+        if (isBullish) {
+          if (isDip) {
+            buyOpportunities.push(stock.symbol);
+          } else {
+            strongRising.push(stock.symbol);
+          }
+        } else {
+          bearishWeak.push(stock.symbol);
+        }
+
+        message += `*${stock.symbol}* ${trend}\n`;
+        message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
+        message += `• RSI: ${stock.rsi?.toFixed(1) ?? "N/A"} | ADX: ${stock.adx?.toFixed(1) ?? "N/A"}${stock.adx >= 25 ? " 🔥" : ""}\n`;
+        message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
+        message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
+        message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
+        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
+        message += `• Recommendation: *${stock.recommendation}*\n`;
+        message += `• Analysis: _${stock.comment}_\n\n`;
+      }
+
+      message += `━━━━━━━━━━━━━━━\n`;
+      message += `📈 *Holdings Summary*:\n`;
+      message += `• *Buy Opportunities (RSI Dip)* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+      message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+      message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
+
+      if (buyOpportunities.length > 0) {
+        message += `🚀 *Action*: Your holdings ${buyOpportunities.join(", ")} are currently in a high-conviction buy/dip zone! You can consider accumulating more.`;
+      } else {
+        message += `💎 *Action*: No high-conviction dip entries for your holdings right now. Let them ride!`;
+      }
+
+      if (useMock) {
+        message += `\n\n⚠️ _This analysis is based on mock holdings._`;
+      }
+
+      await this.sendBotMessage(message);
+    } catch (err: any) {
+      console.error("Holdings analysis failed:", err.message);
+      await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
+    }
+  }
+
+  private getMockHoldings() {
+    return [
+      {
+        tradingsymbol: "NIFTYBEES",
+        quantity: 100,
+        average_price: 250.50,
+        last_price: 262.30,
+        pnl: 1180.00,
+        exchange: "NSE"
+      },
+      {
+        tradingsymbol: "ITBEES",
+        quantity: 150,
+        average_price: 40.20,
+        last_price: 38.50,
+        pnl: -255.00,
+        exchange: "NSE"
+      },
+      {
+        tradingsymbol: "GOLDBEES",
+        quantity: 50,
+        average_price: 60.10,
+        last_price: 64.80,
+        pnl: 235.00,
+        exchange: "NSE"
+      }
+    ];
+  }
+
+  private getMockMFHoldings() {
+    return [
+      {
+        tradingsymbol: "NIPPON_INDIA_SMALL_CAP",
+        isin: "INF204K01014",
+        quantity: 1250.45,
+        average_price: 85.30,
+        last_price: 92.45,
+        pnl: 8940.72,
+        last_price_date: "2026-05-15"
+      },
+      {
+        tradingsymbol: "SBI_CONTRA_FUND",
+        isin: "INF179K01970",
+        quantity: 500.00,
+        average_price: 150.00,
+        last_price: 145.20,
+        pnl: -2400.00,
+        last_price_date: "2026-05-15"
+      }
+    ];
   }
 
   private async sendBotMessage(text: string) {
