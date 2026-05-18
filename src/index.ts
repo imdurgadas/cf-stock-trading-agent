@@ -83,10 +83,34 @@ export class TradingAgent extends Agent<Env> {
       transport: { type: "streamable-http" }
     });
     await this.mcp.waitForConnections();
+
+    // 1. Get all symbols from all watchlists
+    const watchlistResult = await this.mcp.callTool({
+      serverId,
+      name: "get_watchlist",
+      arguments: { category: "ALL" }
+    });
+    if (watchlistResult.isError) throw new Error("MCP Watchlist Retrieval Error");
+    const watchlists = JSON.parse((watchlistResult as any).content[0].text);
+    
+    // 2. Flatten unique symbols
+    const allSymbols = new Set<string>();
+    for (const key of Object.keys(watchlists)) {
+      if (Array.isArray(watchlists[key])) {
+        for (const sym of watchlists[key]) {
+          allSymbols.add(sym);
+        }
+      }
+    }
+
+    // 3. Find opportunities across all watchlists combined
     const result = await this.mcp.callTool({
       serverId,
       name: "find_buy_opportunities",
-      arguments: criteria
+      arguments: {
+        ...criteria,
+        symbols: Array.from(allSymbols)
+      }
     });
     if (result.isError) throw new Error("MCP Tool Error");
     const textContent = (result as any).content[0].text;
@@ -101,9 +125,10 @@ export class TradingAgent extends Agent<Env> {
     const results = [];
     for (const opportunity of params.opportunities) {
       try {
+        const cleanSymbol = opportunity.symbol.split(".")[0];
         const orderId = await kite.placeOrder("regular", {
           exchange: "NSE",
-          tradingsymbol: opportunity.symbol,
+          tradingsymbol: cleanSymbol,
           transaction_type: "BUY",
           quantity: 1, // Simplified for now
           product: "CNC",
@@ -175,6 +200,25 @@ export class TradingAgent extends Agent<Env> {
     return JSON.parse((result as any).content[0].text);
   }
 
+  @callable()
+  async getWatchlist(category: string) {
+    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
+      transport: { type: "streamable-http" }
+    });
+    await this.mcp.waitForConnections();
+
+    const result = await this.mcp.callTool({
+      serverId,
+      name: "get_watchlist",
+      arguments: { category }
+    });
+
+    if (result.isError) throw new Error("MCP get_watchlist Tool Error");
+    const textContent = (result as any).content[0].text;
+    const parsed = JSON.parse(textContent);
+    return category === "ALL" ? parsed : parsed.symbols;
+  }
+
 
 
   @callable()
@@ -235,15 +279,28 @@ export class TradingAgent extends Agent<Env> {
 
     if (!text || String(chatId) !== String(this.env.TELEGRAM_CHAT_ID)) return;
 
-    // 1. Handle "trade <amount>"
-    const tradeMatch = text.match(/^trade\s+(\d+)$/);
-    if (tradeMatch) {
-      const amount = parseInt(tradeMatch[1]);
-      await this.ctx.storage.put("pending_amount", amount);
-      const opportunities = await this.ctx.storage.get<any[]>("last_opportunities");
+    // 1. Handle "trade <symbol> <amount>" or "trade <amount>"
+    const tradeSymbolMatch = text.match(/^trade\s+([a-zA-Z0-9\.\-_]+)\s+(\d+)$/);
+    const tradeAmountMatch = text.match(/^trade\s+(\d+)$/);
+
+    if (tradeSymbolMatch) {
+      const symbol = tradeSymbolMatch[1].toUpperCase();
+      const amount = parseInt(tradeSymbolMatch[2]);
       
+      await this.ctx.storage.put("pending_amount", amount);
+      await this.ctx.storage.put("pending_symbol", symbol);
+
+      const balanceStr = await this.getAvailableBalance();
+      await this.sendBotMessage(`⚠️ *Confirmation*: Buy *${symbol}* for ₹${amount}?\n💰 *Available Balance*: ${balanceStr}\n\nReply "yes" to confirm or "no" to cancel.`);
+      return;
+    } else if (tradeAmountMatch) {
+      const amount = parseInt(tradeAmountMatch[1]);
+      await this.ctx.storage.put("pending_amount", amount);
+      await this.ctx.storage.delete("pending_symbol"); // Clear any specific symbol
+
+      const opportunities = await this.ctx.storage.get<any[]>("last_opportunities");
       if (!opportunities || opportunities.length === 0) {
-        await this.sendBotMessage("No pending opportunities found. Please wait for the next scan.");
+        await this.sendBotMessage("No pending opportunities found. Please wait for the next scan. To trade a specific stock, use `trade <symbol> <amount>`.");
         return;
       }
 
@@ -259,7 +316,7 @@ export class TradingAgent extends Agent<Env> {
       const workflowId = await this.ctx.storage.get<string>("pending_workflow_id");
 
       if (!amount || !workflowId) {
-        await this.sendBotMessage("Nothing to confirm. Use `trade <amount>` first.");
+        await this.sendBotMessage("Nothing to confirm. Use `trade <amount>` or `trade <symbol> <amount>` first.");
         return;
       }
 
@@ -273,6 +330,7 @@ export class TradingAgent extends Agent<Env> {
     // 3. Handle "no" cancellation
     if (text === "no") {
       await this.ctx.storage.delete("pending_amount");
+      await this.ctx.storage.delete("pending_symbol");
       await this.sendBotMessage("❌ Trade cancelled.");
       return;
     }

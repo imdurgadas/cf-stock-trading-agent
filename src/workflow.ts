@@ -80,17 +80,30 @@ Top Pick: ${opportunities[0].symbol} (RSI: ${opportunities[0].rsi.toFixed(1)})\n
       stepName: "User Approval"
     });
 
-    // 5. Fetch the interactive amount set by the bot
-    const finalAmount = await step.do("get-final-amount", async () => {
-      return (await agent.ctx.storage.get("pending_amount")) as number || amount;
+    // 5. Fetch the interactive trade parameters set by the bot
+    const tradeParams = await step.do("get-final-trade-params", async () => {
+      const pendingAmount = (await agent.ctx.storage.get("pending_amount")) as number;
+      const pendingSymbol = (await agent.ctx.storage.get("pending_symbol")) as string;
+      return {
+        amount: pendingAmount || amount,
+        symbol: pendingSymbol || null
+      };
     });
 
     // 6. Place Orders
     const results = await step.do("place-orders", async () => {
-      return await agent.executeOrders({
-        amount: finalAmount,
-        opportunities: opportunities
+      const targetOpportunities = tradeParams.symbol
+        ? [{ symbol: tradeParams.symbol }]
+        : opportunities;
+
+      const res = await agent.executeOrders({
+        amount: tradeParams.amount,
+        opportunities: targetOpportunities
       });
+
+      // Cleanup
+      await agent.ctx.storage.delete("pending_symbol");
+      return res;
     });
 
     return results;
@@ -102,68 +115,86 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
     const agent = (this as any).agent;
     const env = this.env as any;
 
-    // 1. Fetch Watchlist Analysis
-    const analysis = await step.do("fetch-analysis", async () => {
-      return await agent.getWatchlistAnalysis([
-        "INFRABEES.NS",
-        "PSUBNKBEES.NS",
-        "NIFTYBEES.NS",
-        "GOLDBEES.NS",
-        "SILVER1.NS",
-        "ITBEES.NS"
-      ]);
+    // 1. Fetch Watchlist categories from MCP
+    const watchlists = await step.do("fetch-watchlists", async () => {
+      return await agent.getWatchlist("ALL");
     });
 
-    // 2. Format & Send Telegram Message
-    await step.do("send-telegram-report", async () => {
-      let message = `📊 *Watchlist Analysis Report*\n\n`;
-      const buyOpportunities: string[] = [];
-      const strongRising: string[] = [];
-      const bearishWeak: string[] = [];
+    const categories = ["ETF", "IT", "BANK", "ENERGY", "POTENTIAL"];
+    const reports: Record<string, any[]> = {};
 
-      for (const stock of analysis) {
-        const trend = stock.is_st_green ? "🟢" : "🔴";
-        const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
-        const isDip = stock.fall_pct <= -2;
+    // 2. Fetch analysis for each category in separate steps
+    for (const cat of categories) {
+      if (watchlists[cat] && watchlists[cat].length > 0) {
+        reports[cat] = await step.do(`fetch-analysis-${cat}`, async () => {
+          return await agent.getWatchlistAnalysis(watchlists[cat]);
+        });
+      }
+    }
 
-        if (isBullish) {
-          if (isDip) {
-            buyOpportunities.push(stock.symbol);
+    // 3. Format and send Telegram reports sector by sector
+    for (const cat of categories) {
+      const analysis = reports[cat];
+      if (!analysis || analysis.length === 0) continue;
+
+      await step.do(`send-telegram-report-${cat}`, async () => {
+        let message = `📂 *Watchlist Sector: ${cat}*\n`;
+        message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        const buyOpportunities: string[] = [];
+        const strongRising: string[] = [];
+        const bearishWeak: string[] = [];
+
+        for (const stock of analysis) {
+          const trend = stock.is_st_green ? "🟢" : "🔴";
+          const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
+          const isDip = stock.fall_pct <= -2;
+
+          if (isBullish) {
+            if (isDip) {
+              buyOpportunities.push(stock.symbol);
+            } else {
+              strongRising.push(stock.symbol);
+            }
           } else {
-            strongRising.push(stock.symbol);
+            bearishWeak.push(stock.symbol);
           }
-        } else {
-          bearishWeak.push(stock.symbol);
+
+          message += `*${stock.symbol}* ${trend}\n`;
+          message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
+          message += `• RSI: ${stock.rsi?.toFixed(1) ?? "N/A"} | ADX: ${stock.adx?.toFixed(1) ?? "N/A"}${stock.adx >= 25 ? " 🔥" : ""}\n`;
+          message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
+          message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
+          message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
+          message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
+          message += `• Recommendation: *${stock.recommendation}*\n`;
+          message += `• Analysis: _${stock.comment}_\n\n`;
         }
 
-        message += `*${stock.symbol}* ${trend}\n`;
-        message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
-        message += `• RSI: ${stock.rsi.toFixed(1)} | ADX: ${stock.adx.toFixed(1)}${stock.adx >= 25 ? " 🔥" : ""}\n`;
-        message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
-        message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
-        message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
-        message += `• Recommendation: *${stock.recommendation}*\n`;
-        message += `• Analysis: _${stock.comment}_\n\n`;
-      }
+        // Add Sector Summary
+        message += `━━━━━━━━━━━━━━━\n`;
+        message += `📈 *Sector Summary (${cat})*:\n`;
+        message += `• *Buy Opportunities* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+        message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
+        message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
 
-      // Add Summary with explicit stock symbols listed
-      message += `━━━━━━━━━━━━━━━\n`;
-      message += `📈 *Market Sentiment Summary*:\n`;
-      message += `• *Buy Opportunities* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-      message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-      message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
+        if (buyOpportunities.length > 0) {
+          message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use \`trade <symbol> <amount>\` to place selective orders.`;
+        } else if (strongRising.length > 0) {
+          message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
+        } else {
+          message += `⚠️ *Action*: Market looks weak. Stay cautious.`;
+        }
 
-      if (buyOpportunities.length > 0) {
-        message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Check the Trading Workflow.`;
-      } else if (strongRising.length > 0) {
-        message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
-      } else {
-        message += `⚠️ *Action*: Market looks weak. Stay cautious.`;
-      }
+        await sendTelegramMessage(message, {
+          botToken: env.TELEGRAM_BOT_TOKEN,
+          chatId: env.TELEGRAM_CHAT_ID
+        });
+      });
+    }
 
-      // Add Parameter Guide/Glossary
-      message += `\n\n📖 *Technical Parameter Guide*:\n`;
+    // 4. Send Technical parameter glossary
+    await step.do("send-telegram-guide", async () => {
+      let message = `📖 *Technical Parameter Guide*:\n`;
       message += `• *RSI*: Relative Strength Index (<30 is Oversold/Deep Value; >70 is Overbought/Avoid).\n`;
       message += `• *ADX*: Average Directional Index (>25 indicates a strong, sustainable trend).\n`;
       message += `• *EMA20/50*: Exponential Moving Averages (Bullish if price > both). Bullish crossover signals key trend reversal.\n`;
