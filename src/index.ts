@@ -39,6 +39,7 @@ export interface Env {
   BASE_URL: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
+  AI: any;
 }
 
 export class TradingAgent extends Agent<Env> {
@@ -244,7 +245,150 @@ export class TradingAgent extends Agent<Env> {
     return category === "ALL" ? parsed : parsed.symbols;
   }
 
+  @callable()
+  async generateAiAnalysisSummary(stockData: any[], contextName: string): Promise<string> {
+    if (!this.env.AI) {
+      console.warn("[Agent] AI binding is missing from env!");
+      return "⚠️ Cloudflare Workers AI binding is not configured.";
+    }
 
+    // Sort stockData: BUY first, then SELL, then others (HOLD)
+    const sortedData = [...stockData].sort((a, b) => {
+      const getPriority = (rec: string) => {
+        const r = (rec || "").toUpperCase();
+        if (r.includes("BUY")) return 1;
+        if (r.includes("SELL")) return 2;
+        return 3;
+      };
+      return getPriority(a.recommendation) - getPriority(b.recommendation);
+    });
+
+    // Limit elements to prevent large tokens payload and potential worker timeouts
+    const slicedData = sortedData.slice(0, 6).map(stock => ({
+      symbol: stock.symbol,
+      price: stock.ltp,
+      change: stock.fall_pct,
+      rsi: stock.rsi,
+      adx: stock.adx,
+      ema20_above: stock.price_above_ema20,
+      ema50_above: stock.price_above_ema50,
+      crossover: stock.is_ema_bullish_crossover,
+      macd_bullish: stock.is_macd_bullish,
+      bb_oversold: stock.is_near_bb_lower,
+      volume_surge: stock.is_volume_surge,
+      recommendation: stock.recommendation,
+      mcp_comment: stock.comment
+    }));
+
+    const systemPrompt = `You are an elite high-conviction financial analyst and professional trading advisor.
+Your job is to analyze technical indicators for a list of stocks/ETFs and output a premium executive portfolio summary.
+
+For each asset, you MUST:
+1. State the symbol and the clear final recommendation: **BUY**, **SELL**, or **HOLD**.
+2. If the recommendation is **HOLD**: Suggest a realistic, strategic "Good price to sell" (target sell price) based on its current price, indicators, and moving averages, and briefly explain why.
+3. If it's a **BUY**: Explain the momentum drivers (like an RSI dip, bullish crossover, or volume surge).
+4. If it's a **SELL**: Detail the breakdown or overbought signals.
+
+Keep the advice highly actionable, precise, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
+
+    const userPrompt = `Here is the technical indicator dataset for the "${contextName}":
+${JSON.stringify(slicedData, null, 2)}
+
+Provide the premium executive AI analysis report.`;
+
+    try {
+      console.info(`[Agent] Calling Workers AI (Llama 3.2 3B) for ${contextName}...`);
+      const response = await this.env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        max_tokens: 1000
+      });
+      console.info("[Agent] Workers AI returned a response.");
+      return response.response || response.text || "No response received from AI agent.";
+    } catch (err: any) {
+      console.error("[Agent] Workers AI run failed:", err.message);
+      return `❌ Failed to generate AI analysis: ${err.message}`;
+    }
+  }
+
+  @callable()
+  async generateMFAiAnalysisSummary(mfData: any[], contextName: string): Promise<string> {
+    if (!this.env.AI) {
+      console.warn("[Agent] AI binding is missing from env!");
+      return "⚠️ Cloudflare Workers AI binding is not configured.";
+    }
+
+    // Sort mutual funds: EXCELLENT first, then GOOD, then others (AVERAGE, POOR)
+    const sortedMFData = [...mfData].sort((a, b) => {
+      const getGradePriority = (item: any) => {
+        const evalData = item.evaluation || item.mcpAnalysis?.evaluation || {};
+        const g = (evalData.grade || "").toUpperCase();
+        if (g.includes("EXCELLENT")) return 1;
+        if (g.includes("GOOD")) return 2;
+        if (g.includes("AVERAGE")) return 3;
+        return 4;
+      };
+      return getGradePriority(a) - getGradePriority(b);
+    });
+
+    // Map mutual fund data to a compact object for prompt efficiency (limit to top 5)
+    const mappedData = sortedMFData.slice(0, 5).map(item => {
+      const isWatchlist = item.meta !== undefined;
+      const meta = isWatchlist ? item.meta : item;
+      const returns = item.returns || {};
+      const risk = item.risk_metrics || {};
+      const evalData = item.evaluation || item.mcpAnalysis?.evaluation || {};
+      const mcpReturns = item.mcpAnalysis?.returns || {};
+      const mcpRisk = item.mcpAnalysis?.risk_metrics || {};
+
+      return {
+        name: meta.scheme_name || item.name,
+        code: meta.scheme_code || item.schemeCode,
+        house: meta.fund_house || item.fundHouse,
+        cagr_1y: returns.trailing_1y_cagr || mcpReturns.trailing_1y_cagr,
+        cagr_3y: returns.trailing_3y_cagr || mcpReturns.trailing_3y_cagr,
+        sharpe: risk.sharpe_ratio || mcpRisk.sharpe_ratio,
+        sortino: risk.sortino_ratio || mcpRisk.sortino_ratio,
+        volatility: risk.annualized_volatility_pct || mcpRisk.annualized_volatility_pct,
+        grade: evalData.grade,
+        comment: evalData.comment
+      };
+    });
+
+    const systemPrompt = `You are an elite mutual fund expert, portfolio strategist, and professional financial advisor.
+Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios, Volatility, AMFI grades) for mutual funds and output a premium portfolio review.
+
+For each fund, you MUST:
+1. Provide a clear recommendation: **BUY**, **SELL**, or **HOLD**.
+2. If the recommendation is **HOLD**: Suggest under what conditions to sell/switch or what strategic performance parameters to track (e.g. if the CAGR drops below 12% or Sharpe ratio falls below 1.0).
+3. If it's a **BUY**: Explain the strong risk-adjusted performance features (high Sharpe/Sortino or excellent CAGR relative to volatility).
+4. If it's a **SELL**: Detail the risk parameters that are breaking down (e.g. high volatility, negative Sortino ratio, poor AMFI rating, underperforming Benchmark).
+
+Keep the advice highly professional, actionable, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
+
+    const userPrompt = `Here is the mutual fund performance dataset for the "${contextName}":
+${JSON.stringify(mappedData, null, 2)}
+
+Provide the premium AI portfolio analyst report.`;
+
+    try {
+      console.info(`[Agent] Calling Workers AI (Llama 3.2 3B) for Mutual Funds: ${contextName}...`);
+      const response = await this.env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        max_tokens: 1000
+      });
+      console.info("[Agent] Workers AI returned a response for Mutual Funds.");
+      return response.response || response.text || "No response received from AI agent.";
+    } catch (err: any) {
+      console.error("[Agent] Workers AI MF run failed:", err.message);
+      return `❌ Failed to generate AI Mutual Fund analysis: ${err.message}`;
+    }
+  }
 
   @callable()
   async logFromWorkflow(msg: string) {
@@ -444,6 +588,29 @@ export class TradingAgent extends Agent<Env> {
         return;
       }
       await this.handleSearchMF(query);
+      return;
+    }
+
+    // New Command: /guidelines
+    if (text === "guidelines" || text === "guide" || text === "help") {
+      let guide = `📘 <b>Trading Agent Technical Guidelines</b>\n`;
+      guide += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      guide += `📈 <b>Stocks & ETFs Technical Indicators</b>\n`;
+      guide += `• <b>RSI (Relative Strength Index)</b>: Momentum scale. Below 30 is deep value / oversold (potential BUY); above 70 is overbought (potential SELL).\n`;
+      guide += `• <b>ADX (Average Directional Index)</b>: Trend strength. Above 25 indicates a strong, high-conviction trend (up or down).\n`;
+      guide += `• <b>EMA 20/50 Crossover</b>: A 20-day EMA moving above a 50-day EMA is a high-conviction 🚀 Bullish Crossover (key trend reversal signal).\n`;
+      guide += `• <b>MACD Bullish</b>: Signals when short-term momentum shifts positive relative to the long-term trend.\n`;
+      guide += `• <b>Bollinger Bands (BB Lower)</b>: Touching the lower band indicates a price dip / mean-reversion entry zone.\n`;
+      guide += `• <b>Volume Surge</b>: Trading volume &gt;50% above the 20-day average, signaling institutional accumulation.\n\n`;
+      guide += `📊 <b>Mutual Funds Risk & Return Metrics</b>\n`;
+      guide += `• <b>CAGR (1Y/3Y)</b>: Compound Annual Growth Rate. Trailing returns over 1 and 3 years (Ideal is &gt;12%).\n`;
+      guide += `• <b>Sharpe Ratio</b>: Return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means smarter risk management.\n`;
+      guide += `• <b>Sortino Ratio</b>: Return against bad/downside drops. <b>Ideal &gt;1.5</b>. Higher means superior downside crash protection.\n`;
+      guide += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, more stable journey.\n`;
+      guide += `• <b>AMFI Rating / Grade</b>: Rating (EXCELLENT, GOOD, AVERAGE, POOR) based on performance against peers.\n\n`;
+      guide += `💡 <i>Use "/kite_analyze" or "/mf_analyze" to get premium AI reviews incorporating these indicators!</i>`;
+      
+      await this.sendBotHtmlMessage(guide);
       return;
     }
 
@@ -884,6 +1051,16 @@ export class TradingAgent extends Agent<Env> {
       }
 
       await this.sendBotHtmlMessage(message);
+
+      // Now fetch and send AI Portfolio analysis report
+      try {
+        await this.sendBotMessage("🤖 *AI Portfolio Analyst Analysis starting*...");
+        const aiSummary = await this.generateAiAnalysisSummary(analysis, "Active Portfolio Holdings");
+        await this.sendBotMessage(`🤖 *AI Portfolio Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
+      } catch (aiErr: any) {
+        console.error("Failed to generate AI portfolio summary:", aiErr.message);
+        await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
+      }
     } catch (err: any) {
       console.error("Holdings analysis failed:", err.message);
       await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
@@ -946,17 +1123,23 @@ export class TradingAgent extends Agent<Env> {
         await this.sendBotHtmlMessage(chunkMsg);
       }
 
-      // 3. Send the Glossary & Tip
+      // 3. Send Tip and Commands
       let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
-      footer += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
-      footer += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
-      footer += `• <b>Sharpe Ratio</b>: Measures return earned per risk unit. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
-      footer += `• <b>Sortino Ratio</b>: Measures return against bad drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during crashes.\n`;
-      footer += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.\n\n`;
       footer += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>\n`;
-      footer += `🔍 <i>Type "/mf_search [query]" or "/mf_analyze" to analyze specific funds in detail.</i>`;
+      footer += `🔍 <i>Type "/mf_search [query]" or "/mf_analyze" to analyze specific funds in detail.</i>\n`;
+      footer += `📘 <i>Use /guidelines to view the full technical parameters guide.</i>`;
 
       await this.sendBotHtmlMessage(footer);
+
+      // Now call Workers AI to generate premium AI analysis for MF watchlist
+      try {
+        await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
+        const aiSummary = await this.generateMFAiAnalysisSummary(watchlistResults, "Mutual Fund Watchlist");
+        await this.sendBotMessage(`🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
+      } catch (aiErr: any) {
+        console.error("Failed to generate AI MF Watchlist summary:", aiErr.message);
+        await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
+      }
     } catch (err: any) {
       console.error("Failed to analyze MF watchlist:", err);
       await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
@@ -1139,19 +1322,25 @@ export class TradingAgent extends Agent<Env> {
 
     await this.sendBotHtmlMessage(summaryMsg);
 
-    // 4. Send Glossary Footer
+    // 4. Send Help and Guidelines Tip Footer
     let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
-    footer += `📊 <b>Indicator Glossary (Easy Words)</b>:\n`;
-    footer += `• <b>CAGR</b>: The average annual growth rate. Higher means your money grows faster. Ideal is &gt;12%.\n`;
-    footer += `• <b>Sharpe Ratio</b>: Measures return earned per unit of risk. <b>Ideal &gt;1.0</b>. Higher means the fund manager is smart at taking calculated risks.\n`;
-    footer += `• <b>Sortino Ratio</b>: Measures return against <b>only bad/downside</b> drops. <b>Ideal &gt;1.5</b>. Higher means the fund protects you best during market crashes.\n`;
-    footer += `• <b>Volatility</b>: Fluctuation scale. <b>Ideal &lt;15%</b>. Lower means a smoother, less stressful investment ride.`;
+    footer += `📘 <i>Use /guidelines to view the full technical parameters guide.</i>`;
 
     if (useMock) {
       footer += `\n\n⚠️ <i>This analysis is based on mock mutual fund holdings.</i>`;
     }
 
     await this.sendBotHtmlMessage(footer);
+
+    // Now call Workers AI to generate premium AI analysis for MF holdings
+    try {
+      await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
+      const aiSummary = await this.generateMFAiAnalysisSummary(analyzed, "Mutual Fund Portfolio Holdings");
+      await this.sendBotMessage(`🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
+    } catch (aiErr: any) {
+      console.error("Failed to generate AI MF Holdings summary:", aiErr.message);
+      await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
+    }
   }
 
   private getMockHoldings() {
@@ -1309,6 +1498,16 @@ export class TradingAgent extends Agent<Env> {
       }
 
       await this.sendBotHtmlMessage(message);
+
+      // Trigger AI Analysis for watchlist category
+      try {
+        await this.sendBotMessage(`🤖 *AI Sector Analyst Analysis starting for ${category}*...`);
+        const aiSummary = await this.generateAiAnalysisSummary(analysis, `Watchlist Sector: ${category}`);
+        await this.sendBotMessage(`🤖 *AI Analyst Report: ${category}*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
+      } catch (aiErr: any) {
+        console.error(`Failed to generate AI sector summary for ${category}:`, aiErr.message);
+        await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
+      }
     } catch (err: any) {
       console.error(`Failed handleSectorAnalysis for ${category}:`, err.message);
       await this.sendBotMessage(`❌ *Sector Analysis Failed*: ${err.message}`);
@@ -1468,9 +1667,51 @@ export default {
       if (authError) return authError;
 
       const webhookUrl = `${env.BASE_URL}/telegram-webhook`;
-      const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}&drop_pending_updates=true`);
-      const result = await response.json();
-      return new Response(JSON.stringify(result, null, 2), { headers: { "Content-Type": "application/json" } });
+      
+      // 1. Set Telegram Webhook
+      const webhookResponse = await fetch(
+        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}&drop_pending_updates=true`
+      );
+      const webhookResult: any = await webhookResponse.json();
+
+      // 2. Set Bot Commands
+      const commands = [
+        { command: "guidelines", description: "View Technical Parameter Guidelines for Stocks and Mutual Funds" },
+        { command: "kite_login", description: "Authenticate Zerodha Kite session (expires in 45 min)" },
+        { command: "kite_holdings", description: "Fetch active Zerodha stock/ETF holdings" },
+        { command: "kite_analyze", description: "Run AI technical analysis on Kite stock holdings" },
+        { command: "etf_analyze", description: "Scan ETF watchlist technical indicators" },
+        { command: "mf", description: "Fetch active mutual fund holdings" },
+        { command: "mf_analyze", description: "Run AI risk analysis on mutual fund holdings" },
+        { command: "mf_watchlist", description: "Scan mutual fund watchlist risk/returns" },
+        { command: "mf_search", description: "Search 17,000+ mutual funds on AMFI (e.g. Quant)" },
+        { command: "it_analyze", description: "Scan IT sector watchlist technical metrics" },
+        { command: "bank_analyze", description: "Scan Banking sector watchlist technical metrics" },
+        { command: "energy_analyze", description: "Scan Energy sector watchlist technical metrics" },
+        { command: "potential_analyze", description: "Scan Potential sector watchlist technical metrics" }
+      ];
+
+      const commandsResponse = await fetch(
+        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ commands })
+        }
+      );
+      const commandsResult: any = await commandsResponse.json();
+
+      return new Response(
+        JSON.stringify(
+          {
+            webhook: webhookResult,
+            commands: commandsResult
+          },
+          null,
+          2
+        ),
+        { headers: { "Content-Type": "application/json" } }
+      );
     }
 
 

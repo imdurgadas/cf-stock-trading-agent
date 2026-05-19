@@ -190,22 +190,26 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
           chatId: env.TELEGRAM_CHAT_ID
         });
       });
+
+      // 3b. Call Workers AI to generate and send watchlist AI analysis
+      await step.do(`send-telegram-ai-report-${cat}`, async () => {
+        await agent.logFromWorkflow(`Generating AI summary for category ${cat}...`);
+        try {
+          const aiSummary = await agent.generateAiAnalysisSummary(analysis, `Watchlist Sector: ${cat}`);
+          await sendTelegramMessage(`🤖 *AI Analyst Report: ${cat}*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`, {
+            botToken: env.TELEGRAM_BOT_TOKEN,
+            chatId: env.TELEGRAM_CHAT_ID
+          });
+        } catch (aiErr: any) {
+          await agent.logFromWorkflow(`AI analysis failed: ${aiErr.message}`);
+          await sendTelegramMessage(`⚠️ *AI Analyst Report Failed for ${cat}*: ${aiErr.message}`, {
+            botToken: env.TELEGRAM_BOT_TOKEN,
+            chatId: env.TELEGRAM_CHAT_ID
+          });
+        }
+      });
     }
 
-    // 4. Send Technical parameter glossary
-    await step.do("send-telegram-guide", async () => {
-      let message = `📖 *Technical Parameter Guide*:\n`;
-      message += `• *RSI*: Relative Strength Index (<30 is Oversold/Deep Value; >70 is Overbought/Avoid).\n`;
-      message += `• *ADX*: Average Directional Index (>25 indicates a strong, sustainable trend).\n`;
-      message += `• *EMA20/50*: Exponential Moving Averages (Bullish if price > both). Bullish crossover signals key trend reversal.\n`;
-      message += `• *MACD*: Moving Average Convergence Divergence (Bullish signals strong upward momentum).\n`;
-      message += `• *BB Lower*: Bollinger Bands. Near lower band indicates a short-term oversold/mean-reversion entry point.\n`;
-      message += `• *Volume Surge*: Trading volume > 1.5x of 20-day SMA, indicating institutional backing.`;
 
-      await sendTelegramMessage(message, {
-        botToken: env.TELEGRAM_BOT_TOKEN,
-        chatId: env.TELEGRAM_CHAT_ID
-      });
-    });
   }
 }
