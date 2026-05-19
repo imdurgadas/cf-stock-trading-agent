@@ -132,49 +132,14 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
       }
     }
 
-    // 3. Format and send Telegram reports sector by sector
+    // 3. Generate and send Telegram reports as interactive carousels
     for (const cat of categories) {
       const analysis = reports[cat];
       if (!analysis || analysis.length === 0) continue;
 
-      await step.do(`send-telegram-report-${cat}`, async () => {
-        let message = `📂 *Watchlist Sector: ${cat}*\n`;
-        message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-        for (const stock of analysis) {
-          const trend = stock.is_st_green ? "🟢" : "🔴";
-
-          message += `*${stock.symbol}* ${trend}\n`;
-          message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
-          message += `• RSI: ${stock.rsi?.toFixed(1) ?? "N/A"} | ADX: ${stock.adx?.toFixed(1) ?? "N/A"}${stock.adx >= 25 ? " 🔥" : ""}\n`;
-          message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
-          message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
-          message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-          message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n\n`;
-        }
-
-        await sendTelegramMessage(message, {
-          botToken: env.TELEGRAM_BOT_TOKEN,
-          chatId: env.TELEGRAM_CHAT_ID
-        });
-      });
-
-      // 3b. Call Workers AI to generate and send watchlist AI analysis
-      await step.do(`send-telegram-ai-report-${cat}`, async () => {
-        await agent.logFromWorkflow(`Generating AI summary for category ${cat}...`);
-        try {
-          const aiSummary = await agent.generateAiAnalysisSummary(analysis, `Watchlist Sector: ${cat}`);
-          await sendTelegramMessage(`🤖 *AI Analyst Report: ${cat}*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`, {
-            botToken: env.TELEGRAM_BOT_TOKEN,
-            chatId: env.TELEGRAM_CHAT_ID
-          });
-        } catch (aiErr: any) {
-          await agent.logFromWorkflow(`AI analysis failed: ${aiErr.message}`);
-          await sendTelegramMessage(`⚠️ *AI Analyst Report Failed for ${cat}*: ${aiErr.message}`, {
-            botToken: env.TELEGRAM_BOT_TOKEN,
-            chatId: env.TELEGRAM_CHAT_ID
-          });
-        }
+      await step.do(`send-telegram-carousel-${cat}`, async () => {
+        await agent.logFromWorkflow(`Sending sector carousel for category ${cat}...`);
+        await agent.sendWatchlistAnalysisCarousel(cat, analysis);
       });
     }
 

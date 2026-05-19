@@ -259,7 +259,7 @@ export class TradingAgent extends Agent<Env> {
 
     const today = new Date().toISOString().split("T")[0];
     const safeContext = contextName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-    const cacheKey = `ai_cache:stock:${safeContext}:${today}`;
+    const cacheKey = `ai_cache_v3:stock:${safeContext}:${today}`;
 
     try {
       const cached = await this.ctx.storage.get<string>(cacheKey);
@@ -294,16 +294,19 @@ export class TradingAgent extends Agent<Env> {
     }));
 
     const systemPrompt = `You are an elite high-conviction financial analyst and professional trading advisor.
-Your job is to analyze technical indicators for a list of stocks/ETFs and output a premium executive portfolio summary.
+Your job is to analyze technical indicators for a list of stocks/ETFs and output a structured JSON report.
+You MUST output ONLY a valid JSON object matching the schema below. Do NOT include any markdown block formatting, code block backticks (like \`\`\`json), or conversational text. Output ONLY the raw JSON string.
 
-For each asset, you MUST:
-1. State the name and symbol of the asset clearly, and the clear final recommendation: **BUY**, **SELL**, or **HOLD**.
-2. Explicitly list the computed technical indicators in a clean, readable inline format: current price, daily change %, RSI, ADX, EMA20/50 state, EMA crossover, MACD state, Bollinger Band state, and Volume Surge state.
-3. If the recommendation is **HOLD**: Suggest a realistic, strategic "Good price to sell" (target sell price) based on its current price, indicators, and moving averages, and briefly explain why.
-4. If it's a **BUY**: Explain the momentum drivers (like an RSI dip, bullish crossover, or volume surge).
-5. If it's a **SELL**: Detail the breakdown or overbought signals.
-
-Keep the advice highly actionable, precise, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
+Schema:
+{
+  "portfolio_summary": "A brief 2-3 sentence overview of overall portfolio health and asset trend.",
+  "assets": {
+    "<SYMBOL>": {
+      "recommendation": "BUY" | "HOLD" | "SELL",
+      "actionable_insight": "A concise 3-4 sentence analysis paragraph detailing key momentum drivers (RSI, crossover, volume) or risk breakdown. If recommendation is HOLD, suggest a realistic, strategic target sell price based on current price, indicators, and moving averages, and briefly explain why."
+    }
+  }
+}`;
 
     let portfolioTotals = null;
     if (contextName.toLowerCase().includes("portfolio")) {
@@ -342,7 +345,28 @@ Provide the premium executive AI analysis report.`;
         max_tokens: 2048
       });
       console.info("[Agent] Workers AI returned a response.");
-      const resultText = response.response || response.text || "No response received from AI agent.";
+      
+      let resultText: string = "";
+      if (typeof response === "string") {
+        resultText = response;
+      } else if (response && typeof response === "object") {
+        const respObj = response as any;
+        if (respObj.choices && Array.isArray(respObj.choices) && respObj.choices[0]?.message?.content) {
+          resultText = respObj.choices[0].message.content;
+        } else if (respObj.result && typeof respObj.result.response === "string") {
+          resultText = respObj.result.response;
+        } else if (typeof respObj.response === "string") {
+          resultText = respObj.response;
+        } else if (typeof respObj.text === "string") {
+          resultText = respObj.text;
+        } else if (typeof respObj.text === "function") {
+          resultText = await respObj.text();
+        } else {
+          resultText = JSON.stringify(response);
+        }
+      } else {
+        resultText = "No response received from AI agent.";
+      }
       
       if (resultText && !resultText.startsWith("❌") && !resultText.startsWith("⚠️")) {
         try {
@@ -350,7 +374,7 @@ Provide the premium executive AI analysis report.`;
           console.info(`[Agent] Cached AI report under ${cacheKey}`);
           
           // Cleanup old keys
-          const allKeys = await this.ctx.storage.list({ prefix: "ai_cache:" });
+          const allKeys = await this.ctx.storage.list({ prefix: "ai_cache_v3:" });
           for (const [key] of allKeys) {
             if (!key.endsWith(`:${today}`)) {
               await this.ctx.storage.delete(key);
@@ -378,7 +402,7 @@ Provide the premium executive AI analysis report.`;
 
     const today = new Date().toISOString().split("T")[0];
     const safeContext = contextName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-    const cacheKey = `ai_cache:mf:${safeContext}:${today}`;
+    const cacheKey = `ai_cache_v3:mf:${safeContext}:${today}`;
 
     try {
       const cached = await this.ctx.storage.get<string>(cacheKey);
@@ -428,16 +452,19 @@ Provide the premium executive AI analysis report.`;
     });
 
     const systemPrompt = `You are an elite mutual fund expert, portfolio strategist, and professional financial advisor.
-Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios, Volatility) for mutual funds and output a premium portfolio review.
+Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios, Volatility) for mutual funds and output a structured JSON report.
+You MUST output ONLY a valid JSON object matching the schema below. Do NOT include any markdown block formatting, code block backticks (like \`\`\`json), or conversational text. Output ONLY the raw JSON string.
 
-For each fund, you MUST:
-1. Provide a clear recommendation: **BUY**, **SELL**, or **HOLD**.
-2. Explicitly list the computed mutual fund metrics: units/quantity, avg NAV, current/last NAV, invested value, current value, total P&L, trailing 1Y/3Y CAGR returns, Sharpe ratio, Sortino ratio, and Volatility.
-3. If the recommendation is **HOLD**: Suggest under what conditions to sell/switch or what strategic performance parameters to track (e.g. if the CAGR drops below 12% or Sharpe ratio falls below 1.0).
-4. If it's a **BUY**: Explain the strong risk-adjusted performance features (high Sharpe/Sortino or excellent CAGR relative to volatility).
-5. If it's a **SELL**: Detail the risk parameters that are breaking down (e.g. high volatility, negative Sortino ratio, poor Benchmark returns).
-
-Keep the advice highly professional, actionable, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
+Schema:
+{
+  "portfolio_summary": "A brief 2-3 sentence overview of overall portfolio health and fund metrics trend.",
+  "assets": {
+    "<NAME_OR_CODE>": {
+      "recommendation": "BUY" | "HOLD" | "SELL",
+      "actionable_insight": "A concise 3-4 sentence analysis paragraph detailing key risk/reward drivers (Sharpe ratio, Sortino ratio, CAGR relative to volatility). If recommendation is HOLD, suggest under what conditions to sell/switch or what strategic performance parameters to track."
+    }
+  }
+}`;
 
     let portfolioTotals = null;
     if (contextName.toLowerCase().includes("portfolio")) {
@@ -476,7 +503,28 @@ Provide the premium AI portfolio analyst report.`;
         max_tokens: 2048
       });
       console.info("[Agent] Workers AI returned a response for Mutual Funds.");
-      const resultText = response.response || response.text || "No response received from AI agent.";
+      
+      let resultText: string = "";
+      if (typeof response === "string") {
+        resultText = response;
+      } else if (response && typeof response === "object") {
+        const respObj = response as any;
+        if (respObj.choices && Array.isArray(respObj.choices) && respObj.choices[0]?.message?.content) {
+          resultText = respObj.choices[0].message.content;
+        } else if (respObj.result && typeof respObj.result.response === "string") {
+          resultText = respObj.result.response;
+        } else if (typeof respObj.response === "string") {
+          resultText = respObj.response;
+        } else if (typeof respObj.text === "string") {
+          resultText = respObj.text;
+        } else if (typeof respObj.text === "function") {
+          resultText = await respObj.text();
+        } else {
+          resultText = JSON.stringify(response);
+        }
+      } else {
+        resultText = "No response received from AI agent.";
+      }
 
       if (resultText && !resultText.startsWith("❌") && !resultText.startsWith("⚠️")) {
         try {
@@ -484,7 +532,7 @@ Provide the premium AI portfolio analyst report.`;
           console.info(`[Agent] Cached AI report under ${cacheKey}`);
           
           // Cleanup old keys
-          const allKeys = await this.ctx.storage.list({ prefix: "ai_cache:" });
+          const allKeys = await this.ctx.storage.list({ prefix: "ai_cache_v3:" });
           for (const [key] of allKeys) {
             if (!key.endsWith(`:${today}`)) {
               await this.ctx.storage.delete(key);
@@ -574,6 +622,28 @@ Provide the premium AI portfolio analyst report.`;
 
   @callable()
   async handleTelegramUpdate(update: any) {
+    // 0. Handle Callback Query (for Carousel Pagination)
+    if (update.callback_query) {
+      const cbQuery = update.callback_query;
+      const callbackData = cbQuery.data;
+      const messageId = cbQuery.message?.message_id;
+      const chatId = cbQuery.message?.chat?.id;
+
+      if (String(chatId) !== String(this.env.TELEGRAM_CHAT_ID)) return;
+
+      const { answerTelegramCallback } = await import("./notifications");
+      await answerTelegramCallback(cbQuery.id, this.env.TELEGRAM_BOT_TOKEN);
+
+      if (callbackData && callbackData.startsWith("slide:")) {
+        const parts = callbackData.split(":");
+        const type = parts[1]; // "stock" | "mf"
+        const slideIndex = parseInt(parts[2], 10);
+        
+        await this.handleSlideNavigation(chatId, messageId, type, slideIndex);
+      }
+      return;
+    }
+
     const rawText = update.message?.text?.toLowerCase()?.trim();
     const chatId = update.message?.chat?.id;
 
@@ -1102,6 +1172,71 @@ Provide the premium AI portfolio analyst report.`;
     await this.sendBotHtmlMessage(summaryMsg);
   }
 
+  private cleanAndParseJSON(text: string): any {
+    let cleaned = text.trim();
+    // Locate the outermost curly braces to extract raw JSON
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    } else {
+      // Fallback clean markdown code blocks
+      if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```(json)?\n?/, "");
+      }
+      if (cleaned.endsWith("```")) {
+        cleaned = cleaned.replace(/```$/, "");
+      }
+      cleaned = cleaned.trim();
+    }
+    return JSON.parse(cleaned);
+  }
+
+  private async handleSlideNavigation(chatId: number, messageId: number, type: string, slideIndex: number) {
+    let key = "latest_stock_slides";
+    if (type === "mf") {
+      key = "latest_mf_slides";
+    } else if (type.startsWith("watchlist_")) {
+      const cat = type.replace("watchlist_", "").toLowerCase();
+      key = `latest_watchlist_slides_${cat}`;
+    }
+    const slides = await this.ctx.storage.get<string[]>(key);
+    
+    if (!slides || slides.length === 0) {
+      const { editTelegramMessage } = await import("./notifications");
+      await editTelegramMessage(messageId, "⚠️ *Session Expired*: Please run the analysis command again.", {
+        botToken: this.env.TELEGRAM_BOT_TOKEN,
+        chatId: String(chatId),
+        parseMode: "Markdown"
+      });
+      return;
+    }
+
+    const idx = Math.max(0, Math.min(slideIndex, slides.length - 1));
+    const slideText = slides[idx];
+
+    const buttons = [];
+    if (idx > 0) {
+      buttons.push({ text: "◀️ Prev", callback_data: `slide:${type}:${idx - 1}` });
+    }
+    buttons.push({ text: `${idx + 1} / ${slides.length}`, callback_data: `dummy` });
+    if (idx < slides.length - 1) {
+      buttons.push({ text: "Next ▶️", callback_data: `slide:${type}:${idx + 1}` });
+    }
+
+    const replyMarkup = {
+      inline_keyboard: [buttons]
+    };
+
+    const { editTelegramMessage } = await import("./notifications");
+    await editTelegramMessage(messageId, slideText, {
+      botToken: this.env.TELEGRAM_BOT_TOKEN,
+      chatId: String(chatId),
+      parseMode: "Markdown",
+      replyMarkup
+    });
+  }
+
   private async handleAnalyzeHoldings(useMock: boolean) {
     let holdings: any[] = [];
     if (useMock) {
@@ -1165,7 +1300,99 @@ Provide the premium AI portfolio analyst report.`;
         if (useMock) {
           header = `⚠️ *Mock Mode Demo*\n` + header;
         }
-        await this.sendBotMessage(`${header}${aiSummary}`);
+
+        let parsed: any = null;
+        try {
+          parsed = this.cleanAndParseJSON(aiSummary);
+        } catch (e) {
+          console.warn("Failed to parse AI summary as JSON. Falling back to single-text view:", e);
+        }
+
+        if (parsed && parsed.portfolio_summary && parsed.assets) {
+          const slides: string[] = [];
+          
+          let totalInvested = 0;
+          let totalCurrent = 0;
+          for (const item of enrichedAnalysis) {
+            const qty = item.quantity || 0;
+            const avg = item.average_price || 0;
+            const ltp = item.ltp || item.price || 0;
+            totalInvested += qty * avg;
+            totalCurrent += qty * ltp;
+          }
+          const totalPnL = totalCurrent - totalInvested;
+          const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+
+          // Slide 0: Overview
+          let slide0 = `${header}`;
+          slide0 += `📊 *Portfolio Overview*\n`;
+          slide0 += `• *Total Invested*: ₹${totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}\n`;
+          slide0 += `• *Current Value*: ₹${totalCurrent.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}\n`;
+          slide0 += `• *Net Returns*: *${totalPnL >= 0 ? '+' : ''}₹${totalPnL.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}* (*${totalPnLPct >= 0 ? '+' : ''}${totalPnLPct.toFixed(2)}%*)\n\n`;
+          slide0 += `🤖 *AI Summary*:\n${parsed.portfolio_summary}\n\n`;
+          slide0 += `*Holdings Checklist*:\n`;
+          for (const item of enrichedAnalysis) {
+            const changeSign = (item.fall_pct || 0) >= 0 ? '+' : '';
+            const rsiVal = item.rsi ? Math.round(item.rsi) : 'N/A';
+            const adxVal = item.adx ? Math.round(item.adx) : 'N/A';
+            const emaState = item.price_above_ema20 && item.price_above_ema50 ? '🟢' : '🔴';
+            slide0 += `• *${item.symbol.replace(".NS", "")}*: ${emaState} | RSI: \`${rsiVal}\` | ADX: \`${adxVal}\` | LTP: \`₹${item.ltp}\` (${changeSign}${item.fall_pct?.toFixed(2)}%)\n`;
+          }
+          slide0 += `\n_Use the arrows below to browse detailed stock-by-stock AI analysis cards._`;
+          slides.push(slide0);
+
+          // Slide 1..N: Individual Asset Details
+          for (let i = 0; i < enrichedAnalysis.length; i++) {
+            const item = enrichedAnalysis[i];
+            const sym = item.symbol;
+            const cleanSym = sym.replace(".NS", "");
+            const aiAsset = parsed.assets[sym] || parsed.assets[cleanSym] || parsed.assets[sym.toLowerCase()] || parsed.assets[cleanSym.toLowerCase()] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this symbol.' };
+            
+            const changeSign = (item.fall_pct || 0) >= 0 ? '+' : '';
+            const pnlVal = item.pnl || 0;
+            const investedVal = (item.quantity || 0) * (item.average_price || 0);
+            const pnlPct = investedVal > 0 ? (pnlVal / investedVal) * 100 : 0;
+            
+            const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
+
+            let slide = `${header}`;
+            slide += `📈 *Asset ${i + 1} of ${enrichedAnalysis.length}: ${item.name} (${cleanSym})*\n`;
+            slide += `━━━━━━━━━━━━━━━━━━━━━\n`;
+            slide += `• *LTP*: ₹${item.ltp} (${changeSign}${item.fall_pct?.toFixed(2)}%)\n`;
+            slide += `• *RSI*: \`${item.rsi?.toFixed(1) || 'N/A'}\` | *ADX*: \`${item.adx?.toFixed(1) || 'N/A'}\` (Trend: ${item.adx > 25 ? 'Strong' : 'Weak'})\n`;
+            slide += `• *EMA State*: Price is ${item.price_above_ema20 ? 'Above' : 'Below'} EMA20 & ${item.price_above_ema50 ? 'Above' : 'Below'} EMA50\n`;
+            
+            const signals = [];
+            if (item.is_ema_bullish_crossover) signals.push('Bullish Crossover 🚀');
+            if (item.is_macd_bullish) signals.push('MACD Bullish 📈');
+            if (item.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️');
+            if (item.is_volume_surge) signals.push('Volume Surge 🔥');
+            if (signals.length === 0) signals.push('None (Neutral)');
+            
+            slide += `• *Signals*: ${signals.join(', ')}\n\n`;
+            slide += `*My Position*:\n`;
+            slide += `• ${item.quantity} units @ average ₹${item.average_price?.toFixed(2)}\n`;
+            slide += `• Net P&L: *${pnlVal >= 0 ? '+' : ''}₹${pnlVal.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}* (*${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%*)\n\n`;
+            slide += `*AI Recommendation*: *${recEmoji}*\n`;
+            slide += `🤖 *AI Outlook*:\n${aiAsset.actionable_insight}`;
+            slides.push(slide);
+          }
+
+          await this.ctx.storage.put("latest_stock_slides", slides);
+
+          const buttons = [];
+          if (slides.length > 1) {
+            buttons.push({ text: `1 / ${slides.length}`, callback_data: `dummy` });
+            buttons.push({ text: "Next ▶️", callback_data: `slide:stock:1` });
+          }
+          const replyMarkup = {
+            inline_keyboard: buttons.length > 0 ? [buttons] : []
+          };
+          
+          await this.sendBotMessage(slides[0], replyMarkup);
+        } else {
+          await this.sendBotMessage(`${header}${aiSummary}`);
+        }
       } catch (aiErr: any) {
         console.error("Failed to generate AI portfolio summary:", aiErr.message);
         await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
@@ -1326,7 +1553,92 @@ Provide the premium AI portfolio analyst report.`;
       if (useMock) {
         header = `⚠️ *Mock Mode Demo*\n` + header;
       }
-      await this.sendBotMessage(`${header}${aiSummary}`);
+
+      let parsed: any = null;
+      try {
+        parsed = this.cleanAndParseJSON(aiSummary);
+      } catch (e) {
+        console.warn("Failed to parse AI MF summary as JSON. Falling back to single-text view:", e);
+      }
+
+      if (parsed && parsed.portfolio_summary && parsed.assets) {
+        const slides: string[] = [];
+        
+        const totalPnL = totalCurrent - totalInvested;
+        const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+
+        // Slide 0: Overview
+        let slide0 = `${header}`;
+        slide0 += `📊 *Mutual Fund Portfolio Overview*\n`;
+        slide0 += `• *Total Invested*: ₹${totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}\n`;
+        slide0 += `• *Current Value*: ₹${totalCurrent.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}\n`;
+        slide0 += `• *Net Returns*: *${totalPnL >= 0 ? '+' : ''}₹${totalPnL.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}* (*${totalPnLPct >= 0 ? '+' : ''}${totalPnLPct.toFixed(2)}%*)\n\n`;
+        slide0 += `🤖 *AI Summary*:\n${parsed.portfolio_summary}\n\n`;
+        slide0 += `*Mutual Fund Checklist*:\n`;
+        for (const item of analyzed) {
+          const returns = item.returns || item.mcpAnalysis?.returns || {};
+          const cagr3y = returns.trailing_3y_cagr || returns.trailing_1y_cagr || 0;
+          const pnlVal = item.pnl || 0;
+          const pnlPct = item.pnl_pct || 0;
+          const changeSign = pnlVal >= 0 ? '+' : '';
+          slide0 += `• *${item.name}*: NAV \`₹${item.last_price || 'N/A'}\` | 3Y CAGR: \`${cagr3y.toFixed(1)}%\` | P&L: \`${changeSign}${pnlPct.toFixed(1)}%\`\n`;
+        }
+        slide0 += `\n_Use the arrows below to browse detailed mutual fund AI analysis cards._`;
+        slides.push(slide0);
+
+        // Slide 1..N: Individual Asset Details
+        for (let i = 0; i < analyzed.length; i++) {
+          const item = analyzed[i];
+          const code = String(item.schemeCode || item.meta?.scheme_code);
+          const name = item.name;
+          const fundHouse = item.fundHouse || item.meta?.fund_house || 'N/A';
+          const aiAsset = parsed.assets[name] || parsed.assets[code] || parsed.assets[item.meta?.scheme_name] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this fund.' };
+
+          const returns = item.returns || item.mcpAnalysis?.returns || {};
+          const risk = item.risk_metrics || item.mcpAnalysis?.risk_metrics || {};
+          const cagr1y = returns.trailing_1y_cagr || 0;
+          const cagr3y = returns.trailing_3y_cagr || 0;
+          const sharpe = risk.sharpe_ratio || 0;
+          const sortino = risk.sortino_ratio || 0;
+          const volatility = risk.annualized_volatility_pct || 0;
+
+          const pnlVal = item.pnl || 0;
+          const investedVal = (item.quantity || 0) * (item.average_price || 0);
+          const pnlPct = investedVal > 0 ? (pnlVal / investedVal) * 100 : 0;
+          
+          const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
+
+          let slide = `${header}`;
+          slide += `🍀 *Fund ${i + 1} of ${analyzed.length}: ${name}*\n`;
+          slide += `━━━━━━━━━━━━━━━━━━━━━\n`;
+          slide += `• *Scheme Code*: \`${code}\` | *House*: _${fundHouse}_\n`;
+          slide += `• *Current NAV*: ₹${item.last_price} (Avg: ₹${item.average_price?.toFixed(2) || 'N/A'})\n`;
+          slide += `• *CAGR returns*: 1Y: \`${cagr1y.toFixed(1)}%\` | 3Y: \`${cagr3y.toFixed(1)}%\` (Ideal: >12%)\n`;
+          slide += `• *Risk Ratios*: Sharpe: \`${sharpe.toFixed(2)}\` | Sortino: \`${sortino.toFixed(2)}\` (Ideal: >1.5)\n`;
+          slide += `• *Volatility*: \`${volatility.toFixed(2)}%\` (Stable: <15%)\n\n`;
+          slide += `*My Position*:\n`;
+          slide += `• ${item.quantity?.toFixed(3) || '0'} units @ average ₹${item.average_price?.toFixed(2)}\n`;
+          slide += `• Net P&L: *${pnlVal >= 0 ? '+' : ''}₹${pnlVal.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}* (*${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%*)\n\n`;
+          slide += `*AI Recommendation*: *${recEmoji}*\n`;
+          slide += `🤖 *AI Outlook*:\n${aiAsset.actionable_insight}`;
+          slides.push(slide);
+        }
+
+        await this.ctx.storage.put("latest_mf_slides", slides);
+
+        const buttons = [];
+        if (slides.length > 1) {
+          buttons.push({ text: `1 / ${slides.length}`, callback_data: `dummy` });
+          buttons.push({ text: "Next ▶️", callback_data: `slide:mf:1` });
+        }
+        const replyMarkup = {
+          inline_keyboard: buttons.length > 0 ? [buttons] : []
+        };
+        
+        await this.sendBotMessage(slides[0], replyMarkup);
+      } else {
+        await this.sendBotMessage(`${header}${aiSummary}`);
+      }
     } catch (aiErr: any) {
       console.error("Failed to generate AI MF Holdings summary:", aiErr.message);
       await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
@@ -1390,12 +1702,13 @@ Provide the premium AI portfolio analyst report.`;
     ];
   }
 
-  private async sendBotMessage(text: string) {
+  private async sendBotMessage(text: string, replyMarkup?: any) {
     const { sendTelegramMessage } = await import("./notifications");
     console.debug("[Telegram] Sending message:", text);
     await sendTelegramMessage(text, {
       botToken: this.env.TELEGRAM_BOT_TOKEN,
-      chatId: this.env.TELEGRAM_CHAT_ID
+      chatId: this.env.TELEGRAM_CHAT_ID,
+      replyMarkup
     });
     console.debug("[Telegram] Message sent successfully.");
   }
@@ -1433,42 +1746,96 @@ Provide the premium AI portfolio analyst report.`;
         return;
       }
 
-      let message = `📂 <b>Watchlist Sector: ${escapeHtml(category)}</b>\n`;
-      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-      for (const stock of analysis) {
-        const trend = stock.is_st_green ? "🟢" : "🔴";
-        const symbol = escapeHtml(stock.symbol);
-        const ltp = escapeHtml(stock.ltp);
-        const fallPctSign = stock.fall_pct >= 0 ? "+" : "";
-        const fallPctVal = stock.fall_pct.toFixed(2);
-        const rsiVal = stock.rsi?.toFixed(1) ?? "N/A";
-        const adxVal = stock.adx?.toFixed(1) ?? "N/A";
-        const adxFire = stock.adx >= 25 ? " 🔥" : "";
-
-        message += `<b>${symbol}</b> ${trend}\n`;
-        message += `• Price: ₹${ltp} (${fallPctSign}${fallPctVal}%)\n`;
-        message += `• RSI: ${rsiVal} | ADX: ${adxVal}${adxFire}\n`;
-        message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
-        message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
-        message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n\n`;
-      }
-
-      await this.sendBotHtmlMessage(message);
-
-      // Trigger AI Analysis for watchlist category
-      try {
-        await this.sendBotMessage(`🤖 *AI Sector Analyst Analysis starting for ${category}*...`);
-        const aiSummary = await this.generateAiAnalysisSummary(analysis, `Watchlist Sector: ${category}`);
-        await this.sendBotMessage(`🤖 *AI Analyst Report: ${category}*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
-      } catch (aiErr: any) {
-        console.error(`Failed to generate AI sector summary for ${category}:`, aiErr.message);
-        await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
-      }
+      await this.generateAndSendSectorCarousel(category, analysis);
     } catch (err: any) {
       console.error(`Failed handleSectorAnalysis for ${category}:`, err.message);
       await this.sendBotMessage(`❌ *Sector Analysis Failed*: ${err.message}`);
+    }
+  }
+
+  @callable()
+  async sendWatchlistAnalysisCarousel(category: string, analysis: any[]) {
+    await this.generateAndSendSectorCarousel(category, analysis);
+  }
+
+  private async generateAndSendSectorCarousel(category: string, analysis: any[]) {
+    try {
+      await this.sendBotMessage(`🤖 *AI Sector Analyst Analysis starting for ${category}*...`);
+      const aiSummary = await this.generateAiAnalysisSummary(analysis, `Watchlist Sector: ${category}`);
+      let header = `🤖 *AI Analyst Report: ${category}*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      let parsed: any = null;
+      try {
+        parsed = this.cleanAndParseJSON(aiSummary);
+      } catch (e) {
+        console.warn("Failed to parse AI sector summary as JSON. Falling back to single-text view:", e);
+      }
+
+      if (parsed && parsed.portfolio_summary && parsed.assets) {
+        const slides: string[] = [];
+
+        // Slide 0: Overview
+        let slide0 = `${header}`;
+        slide0 += `📊 *Sector Overview*\n`;
+        slide0 += `🤖 *AI Outlook*:\n${parsed.portfolio_summary}\n\n`;
+        slide0 += `*Asset Checklist*:\n`;
+        for (const item of analysis) {
+          const changeSign = (item.fall_pct || 0) >= 0 ? '+' : '';
+          const rsiVal = item.rsi ? Math.round(item.rsi) : 'N/A';
+          const adxVal = item.adx ? Math.round(item.adx) : 'N/A';
+          const emaState = item.price_above_ema20 && item.price_above_ema50 ? '🟢' : '🔴';
+          slide0 += `• *${item.symbol.replace(".NS", "")}*: ${emaState} | RSI: \`${rsiVal}\` | ADX: \`${adxVal}\` | LTP: \`₹${item.ltp}\` (${changeSign}${item.fall_pct?.toFixed(2)}%)\n`;
+        }
+        slide0 += `\n_Use the arrows below to browse detailed stock-by-stock AI analysis cards._`;
+        slides.push(slide0);
+
+        // Slide 1..N: Individual Asset Details
+        for (let i = 0; i < analysis.length; i++) {
+          const item = analysis[i];
+          const sym = item.symbol;
+          const cleanSym = sym.replace(".NS", "");
+          const aiAsset = parsed.assets[sym] || parsed.assets[cleanSym] || parsed.assets[sym.toLowerCase()] || parsed.assets[cleanSym.toLowerCase()] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this symbol.' };
+          
+          const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
+
+          let slide = `${header}`;
+          slide += `📈 *Asset ${i + 1} of ${analysis.length}: ${cleanSym}*\n`;
+          slide += `• Price: \`₹${item.ltp}\` (${(item.fall_pct || 0) >= 0 ? '+' : ''}${item.fall_pct?.toFixed(2)}%)\n`;
+          slide += `• RSI: \`${item.rsi?.toFixed(1) ?? 'N/A'}\` | ADX: \`${item.adx?.toFixed(1) ?? 'N/A'}\`${(item.adx || 0) >= 25 ? ' 🔥' : ''}\n`;
+          slide += `• EMA20/50: ${item.price_above_ema20 ? '✅ Above' : '❌ Below'}/${item.price_above_ema50 ? '✅' : '❌'} (Crossover: ${item.is_ema_bullish_crossover ? '🚀 BULLISH' : '❌'})\n`;
+          
+          const signals = [];
+          if (item.is_ema_bullish_crossover) signals.push('Bullish Crossover 🚀');
+          if (item.is_macd_bullish) signals.push('MACD Bullish 📈');
+          if (item.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️');
+          if (item.is_volume_surge) signals.push('Volume Surge 🔥');
+          if (signals.length === 0) signals.push('None (Neutral)');
+          
+          slide += `• *Signals*: ${signals.join(', ')}\n\n`;
+          slide += `*AI Recommendation*: *${recEmoji}*\n`;
+          slide += `🤖 *AI Outlook*:\n${aiAsset.actionable_insight}`;
+          slides.push(slide);
+        }
+
+        const catKey = category.toLowerCase();
+        await this.ctx.storage.put(`latest_watchlist_slides_${catKey}`, slides);
+
+        const buttons = [];
+        if (slides.length > 1) {
+          buttons.push({ text: `1 / ${slides.length}`, callback_data: `dummy` });
+          buttons.push({ text: "Next ▶️", callback_data: `slide:watchlist_${catKey}:1` });
+        }
+        const replyMarkup = {
+          inline_keyboard: buttons.length > 0 ? [buttons] : []
+        };
+        
+        await this.sendBotMessage(slides[0], replyMarkup);
+      } else {
+        await this.sendBotMessage(`${header}${aiSummary}`);
+      }
+    } catch (aiErr: any) {
+      console.error(`Failed to generate AI sector summary for ${category}:`, aiErr.message);
+      await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
     }
   }
 
