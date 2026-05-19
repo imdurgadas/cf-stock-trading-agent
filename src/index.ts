@@ -1422,47 +1422,77 @@ Provide the premium AI portfolio analyst report.`;
     await this.sendBotMessage("🔍 *Mutual Fund Watchlist Deep Technical Scan Started*...\nQuerying our Technical Analysis MCP Server...");
     try {
       const watchlistResults = await this.analyzeMutualFundMCP(); // calls with no schemeCode
-      
-      // 1. Send the header
-      await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Watchlist Technical Scan</b>\n━━━━━━━━━━━━━━━━━━━━━`);
-
-      // 2. Send mutual fund details in chunks of 3
-      const CHUNK_SIZE = 3;
-      for (let i = 0; i < watchlistResults.length; i += CHUNK_SIZE) {
-        const chunk = watchlistResults.slice(i, i + CHUNK_SIZE);
-        let chunkMsg = "";
-
-        for (const mcp of chunk) {
-          const schemeName = escapeHtml(mcp?.meta?.scheme_name);
-          const fundHouse = escapeHtml(mcp?.meta?.fund_house);
-          const schemeCode = escapeHtml(mcp?.meta?.scheme_code);
-
-          chunkMsg += `• <b>${schemeName}</b>\n`;
-          chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
-          chunkMsg += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
-          chunkMsg += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
-          chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n\n`;
-        }
-
-        await this.sendBotHtmlMessage(chunkMsg);
+      if (!watchlistResults || watchlistResults.length === 0) {
+        await this.sendBotMessage("❌ Watchlist results are empty or could not be loaded.");
+        return;
       }
 
-      // 3. Send Tip and Commands
-      let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
-      footer += `💡 <i>Tip: Purchase direct growth plans of mutual funds for long-term compound growth.</i>\n`;
-      footer += `🔍 <i>Type "/mf_search [query]" or "/mf_analyze" to analyze specific funds in detail.</i>\n`;
-      footer += `📘 <i>Use /guidelines to view the full technical parameters guide.</i>`;
+      await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
+      const aiSummary = await this.generateMFAiAnalysisSummary(watchlistResults, "Mutual Fund Watchlist");
+      let header = `🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-      await this.sendBotHtmlMessage(footer);
-
-      // Now call Workers AI to generate premium AI analysis for MF watchlist
+      let parsed: any = null;
       try {
-        await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
-        const aiSummary = await this.generateMFAiAnalysisSummary(watchlistResults, "Mutual Fund Watchlist");
-        await this.sendBotMessage(`🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
-      } catch (aiErr: any) {
-        console.error("Failed to generate AI MF Watchlist summary:", aiErr.message);
-        await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
+        parsed = this.cleanAndParseJSON(aiSummary);
+      } catch (e) {
+        console.warn("Failed to parse AI MF summary as JSON. Falling back to single-text view:", e);
+      }
+
+      if (parsed && parsed.portfolio_summary && parsed.assets) {
+        const slides: string[] = [];
+
+        // Slide 0: Overview
+        let slide0 = `${header}`;
+        slide0 += `📊 *Mutual Fund Watchlist Overview*\n`;
+        slide0 += `🤖 *AI Outlook*:\n${parsed.portfolio_summary}\n\n`;
+        slide0 += `*Watchlist Fund Checklist*:\n`;
+        for (const item of watchlistResults) {
+          const schemeName = item?.meta?.scheme_name || "N/A";
+          const code = String(item?.meta?.scheme_code || "N/A");
+          const returns1Y = item?.returns?.trailing_1y_cagr ? `${item.returns.trailing_1y_cagr.toFixed(1)}%` : 'N/A';
+          const sharpe = item?.risk_metrics?.sharpe_ratio?.toFixed(1) ?? 'N/A';
+          slide0 += `• *${schemeName}* (Scheme: \`${code}\`): 1Y: \`${returns1Y}\` | Sharpe: \`${sharpe}\`\n`;
+        }
+        slide0 += `\n_Use the arrows below to browse detailed fund-by-fund AI analysis cards._`;
+        slides.push(slide0);
+
+        // Slide 1..N: Individual Asset Details
+        for (let i = 0; i < watchlistResults.length; i++) {
+          const item = watchlistResults[i];
+          const schemeName = item?.meta?.scheme_name || "N/A";
+          const fundHouse = item?.meta?.fund_house || "N/A";
+          const code = String(item?.meta?.scheme_code || "N/A");
+          
+          // Match AI recommendation by code or name
+          const aiAsset = parsed.assets[code] || parsed.assets[schemeName] || parsed.assets[schemeName.toLowerCase()] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this fund.' };
+          
+          const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
+
+          let slide = `${header}`;
+          slide += `🌾 *Fund ${i + 1} of ${watchlistResults.length}: ${schemeName}*\n`;
+          slide += `• House: \`${fundHouse}\` | Scheme: \`${code}\`\n`;
+          slide += `• 1Y CAGR: \`${item?.returns?.trailing_1y_cagr ? item.returns.trailing_1y_cagr.toFixed(2) + '%' : 'N/A'}\` | 3Y CAGR: \`${item?.returns?.trailing_3y_cagr ? item.returns.trailing_3y_cagr.toFixed(2) + '%' : 'N/A'}\`\n`;
+          slide += `• Sharpe: \`${item?.risk_metrics?.sharpe_ratio ? item.risk_metrics.sharpe_ratio.toFixed(2) : 'N/A'}\` | Sortino: \`${item?.risk_metrics?.sortino_ratio ? item.risk_metrics.sortino_ratio.toFixed(2) : 'N/A'}\`\n`;
+          slide += `• Volatility: \`${item?.risk_metrics?.annualized_volatility_pct ? item.risk_metrics.annualized_volatility_pct.toFixed(2) + '%' : 'N/A'}\`\n\n`;
+          slide += `*AI Recommendation*: *${recEmoji}*\n`;
+          slide += `🤖 *AI Outlook*:\n${aiAsset.actionable_insight}`;
+          slides.push(slide);
+        }
+
+        await this.ctx.storage.put("latest_watchlist_slides_mf", slides);
+
+        const buttons = [];
+        if (slides.length > 1) {
+          buttons.push({ text: `1 / ${slides.length}`, callback_data: `dummy` });
+          buttons.push({ text: "Next ▶️", callback_data: `slide:watchlist_mf:1` });
+        }
+        const replyMarkup = {
+          inline_keyboard: buttons.length > 0 ? [buttons] : []
+        };
+        
+        await this.sendBotMessage(slides[0], replyMarkup);
+      } else {
+        await this.sendBotMessage(`${header}${aiSummary}`);
       }
     } catch (err: any) {
       console.error("Failed to analyze MF watchlist:", err);
