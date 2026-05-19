@@ -44,12 +44,26 @@ export interface Env {
 
 export class TradingAgent extends Agent<Env> {
   private kite: any = null;
+  private mcpServerId: string | null = null;
 
   async onStart() {
     // Connect to the MCP server on startup
-    await this.mcp.connect(this.env.MCP_SERVER_URL, {
+    const { id } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
       transport: { type: "streamable-http" }
     });
+    this.mcpServerId = id;
+  }
+
+  private async getMcpServerId(): Promise<string> {
+    if (this.mcpServerId) {
+      return this.mcpServerId;
+    }
+    const { id } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
+      transport: { type: "streamable-http" }
+    });
+    this.mcpServerId = id;
+    await this.mcp.waitForConnections();
+    return id;
   }
 
   async initKite() {
@@ -105,10 +119,7 @@ export class TradingAgent extends Agent<Env> {
       }];
     }
 
-    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
-      transport: { type: "streamable-http" }
-    });
-    await this.mcp.waitForConnections();
+    const serverId = await this.getMcpServerId();
 
     // 1. Get all symbols from all watchlists
     const watchlistResult = await this.mcp.callTool({
@@ -211,10 +222,7 @@ export class TradingAgent extends Agent<Env> {
 
   @callable()
   async getWatchlistAnalysis(symbols: string[]) {
-    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
-      transport: { type: "streamable-http" }
-    });
-    await this.mcp.waitForConnections();
+    const serverId = await this.getMcpServerId();
 
     const result = await this.mcp.callTool({
       serverId,
@@ -228,10 +236,7 @@ export class TradingAgent extends Agent<Env> {
 
   @callable()
   async getWatchlist(category: string) {
-    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
-      transport: { type: "streamable-http" }
-    });
-    await this.mcp.waitForConnections();
+    const serverId = await this.getMcpServerId();
 
     const result = await this.mcp.callTool({
       serverId,
@@ -820,14 +825,56 @@ Provide the premium AI portfolio analyst report.`;
   }
 
   private async enrichMFHoldings(holdings: any[]): Promise<any[]> {
-    const results: any[] = [];
-    for (const h of holdings) {
+    const getFundHouseFromSchemeName = (schemeName: string): string => {
+      const name = schemeName.trim();
+      const houses = [
+        "Parag Parikh", "PPFAS", "Mirae Asset", "Mirae", "SBI", "HDFC", "ICICI Prudential", "ICICI",
+        "Axis", "Kotak", "Tata", "Nippon India", "Nippon", "Quant", "UTI", "DSP", "Motilal Oswal",
+        "Bandhan", "Canara Robeco", "Canara", "Franklin Templeton", "Franklin", "HSBC", "Invesco",
+        "LIC", "PGIM India", "PGIM", "Sundaram", "Union", "Zerodha", "Mahindra Manulife", "Mahindra",
+        "Navi", "WhiteOak Capital", "WhiteOak", "Shriram", "Groww", "Quantum", "Taurus", "JM Financial", "JM"
+      ];
+      for (const house of houses) {
+        if (name.toLowerCase().startsWith(house.toLowerCase())) {
+          if (house === "PPFAS" || house === "Parag Parikh") return "Parag Parikh PPFAS";
+          if (house === "Mirae" || house === "Mirae Asset") return "Mirae Asset";
+          if (house === "ICICI" || house === "ICICI Prudential") return "ICICI Prudential";
+          if (house === "Nippon" || house === "Nippon India") return "Nippon India";
+          if (house === "Canara" || house === "Canara Robeco") return "Canara Robeco";
+          if (house === "Franklin" || house === "Franklin Templeton") return "Franklin Templeton";
+          if (house === "PGIM" || house === "PGIM India") return "PGIM India";
+          if (house === "Mahindra" || house === "Mahindra Manulife") return "Mahindra Manulife";
+          if (house === "WhiteOak" || house === "WhiteOak Capital") return "WhiteOak Capital";
+          return house;
+        }
+      }
+      const parts = name.split(/\s+/);
+      return parts.slice(0, 2).join(" ");
+    };
+
+    const promises = holdings.map(async (h) => {
       const queryName = h.name || h.tradingsymbol || "";
       const cleanName = queryName.replace(/_/g, " ").trim();
       
+      if (cleanName.length > 0) {
+        try {
+          const cached = await this.ctx.storage.get<any>(`mf_isin_mapping:${cleanName}`);
+          if (cached) {
+            console.debug(`[Enrich] Cache HIT for ${cleanName} -> Scheme Code ${cached.schemeCode}`);
+            return {
+              ...h,
+              name: cached.schemeName,
+              schemeCode: cached.schemeCode,
+              fundHouse: cached.fundHouse
+            };
+          }
+        } catch (cacheErr: any) {
+          console.warn("[Enrich] Cache read failed:", cacheErr.message);
+        }
+      }
+
       let schemeCode = null;
       let schemeName = h.name || cleanName;
-      let fundHouse = "Unknown Fund House";
 
       if (cleanName.length > 0) {
         const isISIN = cleanName.startsWith("INF") && cleanName.length === 12;
@@ -840,15 +887,6 @@ Provide the premium AI portfolio analyst report.`;
               schemeCode = bestMatch.scheme_code;
               schemeName = bestMatch.scheme_name;
               console.debug(`[Enrich] Resolved ISIN ${cleanName} to Scheme Code ${schemeCode} ("${schemeName}")`);
-
-              // Fetch details for fund house
-              const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
-              if (detailsRes.ok) {
-                const detailsJson = await detailsRes.json() as any;
-                if (detailsJson.meta) {
-                  fundHouse = detailsJson.meta.fund_house || "Unknown Fund House";
-                }
-              }
             }
           } catch (err: any) {
             console.error(`[Enrich] Failed to resolve ISIN ${cleanName} via MCP:`, err.message);
@@ -874,15 +912,6 @@ Provide the premium AI portfolio analyst report.`;
                 
                 schemeCode = bestMatch.schemeCode;
                 schemeName = bestMatch.schemeName;
-
-                // Fetch details for fund house
-                const detailsRes = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
-                if (detailsRes.ok) {
-                  const detailsJson = await detailsRes.json() as any;
-                  if (detailsJson.meta) {
-                    fundHouse = detailsJson.meta.fund_house || "Unknown Fund House";
-                  }
-                }
               }
             }
           } catch (e) {
@@ -891,14 +920,30 @@ Provide the premium AI portfolio analyst report.`;
         }
       }
 
-      results.push({
+      const fundHouse = getFundHouseFromSchemeName(schemeName);
+
+      if (cleanName.length > 0 && schemeCode) {
+        try {
+          await this.ctx.storage.put(`mf_isin_mapping:${cleanName}`, {
+            schemeCode,
+            schemeName,
+            fundHouse
+          });
+          console.debug(`[Enrich] Saved cache mapping for ${cleanName}`);
+        } catch (cacheErr: any) {
+          console.warn("[Enrich] Cache write failed:", cacheErr.message);
+        }
+      }
+
+      return {
         ...h,
         name: schemeName,
         schemeCode: schemeCode || "N/A",
         fundHouse
-      });
-    }
-    return results;
+      };
+    });
+
+    return Promise.all(promises);
   }
 
   private async handleGetMFHoldings(useMock: boolean) {
@@ -1086,10 +1131,7 @@ Provide the premium AI portfolio analyst report.`;
   }
 
   async analyzeMutualFundMCP(schemeCode?: number) {
-    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
-      transport: { type: "streamable-http" }
-    });
-    await this.mcp.waitForConnections();
+    const serverId = await this.getMcpServerId();
 
     const args = schemeCode !== undefined ? { scheme_code: schemeCode } : {};
 
@@ -1472,10 +1514,7 @@ Provide the premium AI portfolio analyst report.`;
   }
 
   async searchMutualFundsMCP(query: string) {
-    const { id: serverId } = await this.mcp.connect(this.env.MCP_SERVER_URL, {
-      transport: { type: "streamable-http" }
-    });
-    await this.mcp.waitForConnections();
+    const serverId = await this.getMcpServerId();
 
     const result = await this.mcp.callTool({
       serverId,
