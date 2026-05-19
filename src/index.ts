@@ -252,16 +252,22 @@ export class TradingAgent extends Agent<Env> {
       return "⚠️ Cloudflare Workers AI binding is not configured.";
     }
 
-    // Sort stockData: BUY first, then SELL, then others (HOLD)
-    const sortedData = [...stockData].sort((a, b) => {
-      const getPriority = (rec: string) => {
-        const r = (rec || "").toUpperCase();
-        if (r.includes("BUY")) return 1;
-        if (r.includes("SELL")) return 2;
-        return 3;
-      };
-      return getPriority(a.recommendation) - getPriority(b.recommendation);
-    });
+    const today = new Date().toISOString().split("T")[0];
+    const safeContext = contextName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+    const cacheKey = `ai_cache:stock:${safeContext}:${today}`;
+
+    try {
+      const cached = await this.ctx.storage.get<string>(cacheKey);
+      if (cached) {
+        console.info(`[Agent] Returning cached AI report for ${cacheKey}`);
+        return cached;
+      }
+    } catch (cacheErr: any) {
+      console.warn(`[Agent] Cache read failed:`, cacheErr.message);
+    }
+
+    // Sort stockData: largest drop first
+    const sortedData = [...stockData].sort((a, b) => (a.fall_pct || 0) - (b.fall_pct || 0));
 
     // Limit elements to prevent large tokens payload and potential worker timeouts
     const slicedData = sortedData.slice(0, 6).map(stock => ({
@@ -275,9 +281,7 @@ export class TradingAgent extends Agent<Env> {
       crossover: stock.is_ema_bullish_crossover,
       macd_bullish: stock.is_macd_bullish,
       bb_oversold: stock.is_near_bb_lower,
-      volume_surge: stock.is_volume_surge,
-      recommendation: stock.recommendation,
-      mcp_comment: stock.comment
+      volume_surge: stock.is_volume_surge
     }));
 
     const systemPrompt = `You are an elite high-conviction financial analyst and professional trading advisor.
@@ -306,7 +310,27 @@ Provide the premium executive AI analysis report.`;
         max_tokens: 1000
       });
       console.info("[Agent] Workers AI returned a response.");
-      return response.response || response.text || "No response received from AI agent.";
+      const resultText = response.response || response.text || "No response received from AI agent.";
+      
+      if (resultText && !resultText.startsWith("❌") && !resultText.startsWith("⚠️")) {
+        try {
+          await this.ctx.storage.put(cacheKey, resultText);
+          console.info(`[Agent] Cached AI report under ${cacheKey}`);
+          
+          // Cleanup old keys
+          const allKeys = await this.ctx.storage.list({ prefix: "ai_cache:" });
+          for (const [key] of allKeys) {
+            if (!key.endsWith(`:${today}`)) {
+              await this.ctx.storage.delete(key);
+              console.info(`[Agent] Deleted stale cache key: ${key}`);
+            }
+          }
+        } catch (cacheErr: any) {
+          console.warn(`[Agent] Cache write/cleanup failed:`, cacheErr.message);
+        }
+      }
+
+      return resultText;
     } catch (err: any) {
       console.error("[Agent] Workers AI run failed:", err.message);
       return `❌ Failed to generate AI analysis: ${err.message}`;
@@ -320,17 +344,27 @@ Provide the premium executive AI analysis report.`;
       return "⚠️ Cloudflare Workers AI binding is not configured.";
     }
 
-    // Sort mutual funds: EXCELLENT first, then GOOD, then others (AVERAGE, POOR)
+    const today = new Date().toISOString().split("T")[0];
+    const safeContext = contextName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+    const cacheKey = `ai_cache:mf:${safeContext}:${today}`;
+
+    try {
+      const cached = await this.ctx.storage.get<string>(cacheKey);
+      if (cached) {
+        console.info(`[Agent] Returning cached AI report for ${cacheKey}`);
+        return cached;
+      }
+    } catch (cacheErr: any) {
+      console.warn(`[Agent] Cache read failed:`, cacheErr.message);
+    }
+
+    // Sort mutual funds: cagr_3y descending
     const sortedMFData = [...mfData].sort((a, b) => {
-      const getGradePriority = (item: any) => {
-        const evalData = item.evaluation || item.mcpAnalysis?.evaluation || {};
-        const g = (evalData.grade || "").toUpperCase();
-        if (g.includes("EXCELLENT")) return 1;
-        if (g.includes("GOOD")) return 2;
-        if (g.includes("AVERAGE")) return 3;
-        return 4;
-      };
-      return getGradePriority(a) - getGradePriority(b);
+      const returnsA = a.returns || a.mcpAnalysis?.returns || {};
+      const returnsB = b.returns || b.mcpAnalysis?.returns || {};
+      const cagrA = returnsA.trailing_3y_cagr || returnsA.trailing_1y_cagr || 0;
+      const cagrB = returnsB.trailing_3y_cagr || returnsB.trailing_1y_cagr || 0;
+      return cagrB - cagrA;
     });
 
     // Map mutual fund data to a compact object for prompt efficiency (limit to top 5)
@@ -339,7 +373,6 @@ Provide the premium executive AI analysis report.`;
       const meta = isWatchlist ? item.meta : item;
       const returns = item.returns || {};
       const risk = item.risk_metrics || {};
-      const evalData = item.evaluation || item.mcpAnalysis?.evaluation || {};
       const mcpReturns = item.mcpAnalysis?.returns || {};
       const mcpRisk = item.mcpAnalysis?.risk_metrics || {};
 
@@ -351,20 +384,18 @@ Provide the premium executive AI analysis report.`;
         cagr_3y: returns.trailing_3y_cagr || mcpReturns.trailing_3y_cagr,
         sharpe: risk.sharpe_ratio || mcpRisk.sharpe_ratio,
         sortino: risk.sortino_ratio || mcpRisk.sortino_ratio,
-        volatility: risk.annualized_volatility_pct || mcpRisk.annualized_volatility_pct,
-        grade: evalData.grade,
-        comment: evalData.comment
+        volatility: risk.annualized_volatility_pct || mcpRisk.annualized_volatility_pct
       };
     });
 
     const systemPrompt = `You are an elite mutual fund expert, portfolio strategist, and professional financial advisor.
-Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios, Volatility, AMFI grades) for mutual funds and output a premium portfolio review.
+Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios, Volatility) for mutual funds and output a premium portfolio review.
 
 For each fund, you MUST:
 1. Provide a clear recommendation: **BUY**, **SELL**, or **HOLD**.
 2. If the recommendation is **HOLD**: Suggest under what conditions to sell/switch or what strategic performance parameters to track (e.g. if the CAGR drops below 12% or Sharpe ratio falls below 1.0).
 3. If it's a **BUY**: Explain the strong risk-adjusted performance features (high Sharpe/Sortino or excellent CAGR relative to volatility).
-4. If it's a **SELL**: Detail the risk parameters that are breaking down (e.g. high volatility, negative Sortino ratio, poor AMFI rating, underperforming Benchmark).
+4. If it's a **SELL**: Detail the risk parameters that are breaking down (e.g. high volatility, negative Sortino ratio, poor Benchmark returns).
 
 Keep the advice highly professional, actionable, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
 
@@ -383,7 +414,27 @@ Provide the premium AI portfolio analyst report.`;
         max_tokens: 1000
       });
       console.info("[Agent] Workers AI returned a response for Mutual Funds.");
-      return response.response || response.text || "No response received from AI agent.";
+      const resultText = response.response || response.text || "No response received from AI agent.";
+
+      if (resultText && !resultText.startsWith("❌") && !resultText.startsWith("⚠️")) {
+        try {
+          await this.ctx.storage.put(cacheKey, resultText);
+          console.info(`[Agent] Cached AI report under ${cacheKey}`);
+          
+          // Cleanup old keys
+          const allKeys = await this.ctx.storage.list({ prefix: "ai_cache:" });
+          for (const [key] of allKeys) {
+            if (!key.endsWith(`:${today}`)) {
+              await this.ctx.storage.delete(key);
+              console.info(`[Agent] Deleted stale cache key: ${key}`);
+            }
+          }
+        } catch (cacheErr: any) {
+          console.warn(`[Agent] Cache write/cleanup failed:`, cacheErr.message);
+        }
+      }
+
+      return resultText;
     } catch (err: any) {
       console.error("[Agent] Workers AI MF run failed:", err.message);
       return `❌ Failed to generate AI Mutual Fund analysis: ${err.message}`;
@@ -994,34 +1045,15 @@ Provide the premium AI portfolio analyst report.`;
       let message = `🔍 <b>Holdings Technical Analysis</b>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-      const buyOpportunities: string[] = [];
-      const strongRising: string[] = [];
-      const bearishWeak: string[] = [];
-
       for (const stock of analysis) {
         const trend = stock.is_st_green ? "🟢" : "🔴";
-        const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
-        const isDip = stock.fall_pct <= -2;
-
         const symbol = escapeHtml(stock.symbol);
-        if (isBullish) {
-          if (isDip) {
-            buyOpportunities.push(symbol);
-          } else {
-            strongRising.push(symbol);
-          }
-        } else {
-          bearishWeak.push(symbol);
-        }
-
         const ltp = escapeHtml(stock.ltp);
         const fallPctSign = stock.fall_pct >= 0 ? "+" : "";
         const fallPctVal = stock.fall_pct.toFixed(2);
         const rsiVal = stock.rsi?.toFixed(1) ?? "N/A";
         const adxVal = stock.adx?.toFixed(1) ?? "N/A";
         const adxFire = stock.adx >= 25 ? " 🔥" : "";
-        const recommend = escapeHtml(stock.recommendation);
-        const comment = escapeHtml(stock.comment);
 
         message += `<b>${symbol}</b> ${trend}\n`;
         message += `• Price: ₹${ltp} (${fallPctSign}${fallPctVal}%)\n`;
@@ -1029,25 +1061,11 @@ Provide the premium AI portfolio analyst report.`;
         message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
         message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
         message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
-        message += `• Recommendation: <b>${recommend}</b>\n`;
-        message += `• Analysis: <i>"${comment}"</i>\n\n`;
-      }
-
-      message += `━━━━━━━━━━━━━━━\n`;
-      message += `📈 <b>Holdings Summary</b>:\n`;
-      message += `• <b>Buy Opportunities (RSI Dip)</b> (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
-      message += `• <b>Strong & Rising</b> (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
-      message += `• <b>Bearish/Weak</b> (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n\n`;
-
-      if (buyOpportunities.length > 0) {
-        message += `🚀 <b>Action</b>: Your holdings ${buyOpportunities.map(s => `<b>${s}</b>`).join(", ")} are currently in a high-conviction buy/dip zone! You can consider accumulating more.`;
-      } else {
-        message += `💎 <b>Action</b>: No high-conviction dip entries for your holdings right now. Let them ride!`;
+        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n\n`;
       }
 
       if (useMock) {
-        message += `\n\n⚠️ <i>This analysis is based on mock holdings.</i>`;
+        message += `\n⚠️ <i>This analysis is based on mock holdings.</i>`;
       }
 
       await this.sendBotHtmlMessage(message);
@@ -1100,24 +1118,15 @@ Provide the premium AI portfolio analyst report.`;
         let chunkMsg = "";
 
         for (const mcp of chunk) {
-          const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
-            : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
-            : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
-            : "🔴";
-
           const schemeName = escapeHtml(mcp?.meta?.scheme_name);
           const fundHouse = escapeHtml(mcp?.meta?.fund_house);
           const schemeCode = escapeHtml(mcp?.meta?.scheme_code);
-          const grade = escapeHtml(mcp?.evaluation?.grade);
-          const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
 
           chunkMsg += `• <b>${schemeName}</b>\n`;
           chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
           chunkMsg += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
           chunkMsg += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
-          chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
-          chunkMsg += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
-          chunkMsg += `  Comment: <i>"${comment}"</i>\n\n`;
+          chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n\n`;
         }
 
         await this.sendBotHtmlMessage(chunkMsg);
@@ -1125,7 +1134,7 @@ Provide the premium AI portfolio analyst report.`;
 
       // 3. Send Tip and Commands
       let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
-      footer += `💡 <i>Tip: Purchase direct growth plans of funds with 🌟 EXCELLENT or 🟢 GOOD ratings for long-term compound growth.</i>\n`;
+      footer += `💡 <i>Tip: Purchase direct growth plans of mutual funds for long-term compound growth.</i>\n`;
       footer += `🔍 <i>Type "/mf_search [query]" or "/mf_analyze" to analyze specific funds in detail.</i>\n`;
       footer += `📘 <i>Use /guidelines to view the full technical parameters guide.</i>`;
 
@@ -1235,24 +1244,15 @@ Provide the premium AI portfolio analyst report.`;
         if (qty === 0) continue;
 
         const mcp = h.mcpAnalysis;
-        const gradeIcon = mcp?.evaluation?.grade === "EXCELLENT" ? "🌟" 
-          : mcp?.evaluation?.grade === "GOOD" ? "🟢" 
-          : mcp?.evaluation?.grade === "AVERAGE" ? "🟡" 
-          : "🔴";
-
         const fundName = escapeHtml(h.name);
         const fundHouse = escapeHtml(h.fundHouse);
         const schemeCode = escapeHtml(h.schemeCode);
-        const grade = escapeHtml(mcp?.evaluation?.grade);
-        const comment = escapeHtml(mcp?.evaluation?.comment || "No historical analysis available.");
 
         chunkMsg += `• <b>${fundName}</b>\n`;
         chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
         chunkMsg += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
         chunkMsg += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
-        chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n`;
-        chunkMsg += `  Grade: ${gradeIcon} <b>${grade}</b>\n`;
-        chunkMsg += `  Comment: <i>"${comment}"</i>\n\n`;
+        chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n\n`;
       }
 
       if (chunkMsg.trim()) {
@@ -1310,14 +1310,6 @@ Provide the premium AI portfolio analyst report.`;
     for (const item of allocationData) {
       const itemName = escapeHtml(item.name);
       summaryMsg += `• <b>${itemName}</b>: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
-    }
-
-    if (totalPnLPct >= 10) {
-      summaryMsg += `\n🚀 <b>Analysis</b>: Your Mutual Fund portfolio is performing exceptionally well with strong double-digit growth. Stay invested!`;
-    } else if (totalPnLPct >= 0) {
-      summaryMsg += `\n💎 <b>Analysis</b>: Your portfolio has stable positive growth. Excellent asset distribution and long-term momentum.`;
-    } else {
-      summaryMsg += `\n⚠️ <b>Analysis</b>: Portfolio returns are currently in the negative zone. Consider evaluating underperforming assets for capital protection.`;
     }
 
     await this.sendBotHtmlMessage(summaryMsg);
@@ -1442,34 +1434,16 @@ Provide the premium AI portfolio analyst report.`;
 
       let message = `📂 <b>Watchlist Sector: ${escapeHtml(category)}</b>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-      const buyOpportunities: string[] = [];
-      const strongRising: string[] = [];
-      const bearishWeak: string[] = [];
 
       for (const stock of analysis) {
         const trend = stock.is_st_green ? "🟢" : "🔴";
-        const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
-        const isDip = stock.fall_pct <= -2;
-
         const symbol = escapeHtml(stock.symbol);
-        if (isBullish) {
-          if (isDip) {
-            buyOpportunities.push(symbol);
-          } else {
-            strongRising.push(symbol);
-          }
-        } else {
-          bearishWeak.push(symbol);
-        }
-
         const ltp = escapeHtml(stock.ltp);
         const fallPctSign = stock.fall_pct >= 0 ? "+" : "";
         const fallPctVal = stock.fall_pct.toFixed(2);
         const rsiVal = stock.rsi?.toFixed(1) ?? "N/A";
         const adxVal = stock.adx?.toFixed(1) ?? "N/A";
         const adxFire = stock.adx >= 25 ? " 🔥" : "";
-        const recommend = escapeHtml(stock.recommendation);
-        const comment = escapeHtml(stock.comment);
 
         message += `<b>${symbol}</b> ${trend}\n`;
         message += `• Price: ₹${ltp} (${fallPctSign}${fallPctVal}%)\n`;
@@ -1477,24 +1451,7 @@ Provide the premium AI portfolio analyst report.`;
         message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
         message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
         message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
-        message += `• Recommendation: <b>${recommend}</b>\n`;
-        message += `• Analysis: <i>"${comment}"</i>\n\n`;
-      }
-
-      // Add Sector Summary
-      message += `━━━━━━━━━━━━━━━\n`;
-      message += `📈 <b>Sector Summary (${escapeHtml(category)})</b>:\n`;
-      message += `• <b>Buy Opportunities</b> (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
-      message += `• <b>Strong & Rising</b> (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n`;
-      message += `• <b>Bearish/Weak</b> (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `<b>${s}</b>`).join(", ") : "<i>None</i>"}\n\n`;
-
-      if (buyOpportunities.length > 0) {
-        message += `🚀 <b>Action</b>: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use <code>trade &lt;symbol&gt; &lt;amount&gt;</code> to place selective orders.`;
-      } else if (strongRising.length > 0) {
-        message += `💎 <b>Action</b>: Market is strong but not at a discount. No new entries recommended.`;
-      } else {
-        message += `⚠️ <b>Action</b>: Market looks weak. Stay cautious.`;
+        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n\n`;
       }
 
       await this.sendBotHtmlMessage(message);

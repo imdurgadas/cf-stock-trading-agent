@@ -140,24 +140,9 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
       await step.do(`send-telegram-report-${cat}`, async () => {
         let message = `📂 *Watchlist Sector: ${cat}*\n`;
         message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-        const buyOpportunities: string[] = [];
-        const strongRising: string[] = [];
-        const bearishWeak: string[] = [];
 
         for (const stock of analysis) {
           const trend = stock.is_st_green ? "🟢" : "🔴";
-          const isBullish = stock.is_st_green && stock.price_above_ema20 && stock.price_above_ema50;
-          const isDip = stock.fall_pct <= -2;
-
-          if (isBullish) {
-            if (isDip) {
-              buyOpportunities.push(stock.symbol);
-            } else {
-              strongRising.push(stock.symbol);
-            }
-          } else {
-            bearishWeak.push(stock.symbol);
-          }
 
           message += `*${stock.symbol}* ${trend}\n`;
           message += `• Price: ₹${stock.ltp} (${stock.fall_pct >= 0 ? "+" : ""}${stock.fall_pct.toFixed(2)}%)\n`;
@@ -165,24 +150,7 @@ export class WatchlistAnalysisWorkflow extends AgentWorkflow<any, {}> {
           message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
           message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
           message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-          message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n`;
-          message += `• Recommendation: *${stock.recommendation}*\n`;
-          message += `• Analysis: _${stock.comment}_\n\n`;
-        }
-
-        // Add Sector Summary
-        message += `━━━━━━━━━━━━━━━\n`;
-        message += `📈 *Sector Summary (${cat})*:\n`;
-        message += `• *Buy Opportunities* (${buyOpportunities.length}): ${buyOpportunities.length > 0 ? buyOpportunities.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-        message += `• *Strong & Rising* (${strongRising.length}): ${strongRising.length > 0 ? strongRising.map(s => `*${s}*`).join(", ") : "_None_"}\n`;
-        message += `• *Bearish/Weak* (${bearishWeak.length}): ${bearishWeak.length > 0 ? bearishWeak.map(s => `*${s}*`).join(", ") : "_None_"}\n\n`;
-
-        if (buyOpportunities.length > 0) {
-          message += `🚀 *Action*: Found ${buyOpportunities.length} dip opportunities (${buyOpportunities.join(", ")})! Use \`kite_trade <symbol> <amount>\` to place selective orders.`;
-        } else if (strongRising.length > 0) {
-          message += `💎 *Action*: Market is strong but not at a discount. No new entries recommended.`;
-        } else {
-          message += `⚠️ *Action*: Market looks weak. Stay cautious.`;
+          message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n\n`;
         }
 
         await sendTelegramMessage(message, {
