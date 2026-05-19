@@ -296,6 +296,9 @@ export class TradingAgent extends Agent<Env> {
     const systemPrompt = `You are an elite high-conviction financial analyst and professional trading advisor.
 Your job is to analyze technical indicators for a list of stocks/ETFs and output a structured JSON report.
 You MUST output ONLY a valid JSON object matching the schema below. Do NOT include any markdown block formatting, code block backticks (like \`\`\`json), or conversational text. Output ONLY the raw JSON string.
+Formatting constraints:
+- Do NOT use double underscores (__text__) or HTML underline tags (<u>) anywhere.
+- If you wish to emphasize words, use standard single asterisks (*bold*) for bolding.
 
 Schema:
 {
@@ -454,6 +457,9 @@ Provide the premium executive AI analysis report.`;
     const systemPrompt = `You are an elite mutual fund expert, portfolio strategist, and professional financial advisor.
 Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios, Volatility) for mutual funds and output a structured JSON report.
 You MUST output ONLY a valid JSON object matching the schema below. Do NOT include any markdown block formatting, code block backticks (like \`\`\`json), or conversational text. Output ONLY the raw JSON string.
+Formatting constraints:
+- Do NOT use double underscores (__text__) or HTML underline tags (<u>) anywhere.
+- If you wish to emphasize words, use standard single asterisks (*bold*) for bolding.
 
 Schema:
 {
@@ -776,8 +782,7 @@ Provide the premium AI portfolio analyst report.`;
 
     // New Command: /guidelines
     if (text === "guidelines" || text === "guide" || text === "help") {
-      let guide = `📘 <b>Trading Agent Technical Guidelines</b>\n`;
-      guide += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      let guide = `📘 <b>Trading Agent Technical Guidelines</b>\n\n`;
       guide += `📈 <b>Stocks & ETFs Technical Indicators</b>\n`;
       guide += `• <b>RSI (Relative Strength Index)</b>: Momentum scale. Below 30 is deep value / oversold (potential BUY); above 70 is overbought (potential SELL).\n`;
       guide += `• <b>ADX (Average Directional Index)</b>: Trend strength. Above 25 indicates a strong, high-conviction trend (up or down).\n`;
@@ -899,7 +904,7 @@ Provide the premium AI portfolio analyst report.`;
     }
 
     // 1. Send Header
-    await this.sendBotHtmlMessage(`📊 <b>Kite Equity Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
+    await this.sendBotHtmlMessage(`📊 <b>Kite Equity Holdings</b>`);
 
     // 2. Send Stock Items in chunks of 5
     const CHUNK_SIZE = 5;
@@ -939,7 +944,7 @@ Provide the premium AI portfolio analyst report.`;
     const totalSign = totalPnL >= 0 ? "+" : "";
 
     // 3. Send Portfolio Summary
-    let summaryMsg = `━━━━━━━━━━━━━━━━━━━━━\n`;
+    let summaryMsg = `\n`;
     summaryMsg += `💰 <b>Total Invested</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
     summaryMsg += `📈 <b>Current Value</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
     summaryMsg += `📊 <b>Total P&L</b>: <b>${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${totalSign}${totalPnLPct.toFixed(2)}%)`;
@@ -1117,7 +1122,7 @@ Provide the premium AI portfolio analyst report.`;
     }
 
     // 1. Send Header
-    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Holdings</b>\n━━━━━━━━━━━━━━━━━━━━━`);
+    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Holdings</b>`);
 
     // 2. Send MF Items in chunks of 4
     const CHUNK_SIZE = 4;
@@ -1160,7 +1165,7 @@ Provide the premium AI portfolio analyst report.`;
     const totalSign = totalPnL >= 0 ? "+" : "";
 
     // 3. Send Portfolio Summary
-    let summaryMsg = `━━━━━━━━━━━━━━━━━━━━━\n`;
+    let summaryMsg = `\n`;
     summaryMsg += `💰 <b>Total MF Invested</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
     summaryMsg += `📈 <b>Current MF Value</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
     summaryMsg += `📊 <b>Total MF P&L</b>: <b>${totalTrend} ${totalSign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${totalSign}${totalPnLPct.toFixed(2)}%)`;
@@ -1296,7 +1301,7 @@ Provide the premium AI portfolio analyst report.`;
       try {
         await this.sendBotMessage("🤖 *AI Portfolio Analyst Analysis starting*...");
         const aiSummary = await this.generateAiAnalysisSummary(enrichedAnalysis, "Active Portfolio Holdings");
-        let header = `🤖 *AI Portfolio Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        let header = `🤖 *AI Portfolio Analyst Report*\n\n`;
         if (useMock) {
           header = `⚠️ *Mock Mode Demo*\n` + header;
         }
@@ -1356,8 +1361,7 @@ Provide the premium AI portfolio analyst report.`;
             const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
 
             let slide = `${header}`;
-            slide += `📈 *Asset ${i + 1} of ${enrichedAnalysis.length}: ${item.name} (${cleanSym})*\n`;
-            slide += `━━━━━━━━━━━━━━━━━━━━━\n`;
+            slide += `📈 *Asset ${i + 1} of ${enrichedAnalysis.length}: ${item.name} (${cleanSym})*\n\n`;
             slide += `• *LTP*: ₹${item.ltp} (${changeSign}${item.fall_pct?.toFixed(2)}%)\n`;
             slide += `• *RSI*: \`${item.rsi?.toFixed(1) || 'N/A'}\` | *ADX*: \`${item.adx?.toFixed(1) || 'N/A'}\` (Trend: ${item.adx > 25 ? 'Strong' : 'Weak'})\n`;
             slide += `• *EMA State*: Price is ${item.price_above_ema20 ? 'Above' : 'Below'} EMA20 & ${item.price_above_ema50 ? 'Above' : 'Below'} EMA50\n`;
@@ -1429,7 +1433,7 @@ Provide the premium AI portfolio analyst report.`;
 
       await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
       const aiSummary = await this.generateMFAiAnalysisSummary(watchlistResults, "Mutual Fund Watchlist");
-      let header = `🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      let header = `🤖 *AI Mutual Fund Analyst Report*\n\n`;
 
       let parsed: any = null;
       try {
@@ -1579,7 +1583,7 @@ Provide the premium AI portfolio analyst report.`;
     try {
       await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
       const aiSummary = await this.generateMFAiAnalysisSummary(analyzed, "Mutual Fund Portfolio Holdings");
-      let header = `🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      let header = `🤖 *AI Mutual Fund Analyst Report*\n\n`;
       if (useMock) {
         header = `⚠️ *Mock Mode Demo*\n` + header;
       }
@@ -1639,8 +1643,7 @@ Provide the premium AI portfolio analyst report.`;
           const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
 
           let slide = `${header}`;
-          slide += `🍀 *Fund ${i + 1} of ${analyzed.length}: ${name}*\n`;
-          slide += `━━━━━━━━━━━━━━━━━━━━━\n`;
+          slide += `🍀 *Fund ${i + 1} of ${analyzed.length}: ${name}*\n\n`;
           slide += `• *Scheme Code*: \`${code}\` | *House*: _${fundHouse}_\n`;
           slide += `• *Current NAV*: ₹${item.last_price} (Avg: ₹${item.average_price?.toFixed(2) || 'N/A'})\n`;
           slide += `• *CAGR returns*: 1Y: \`${cagr1y.toFixed(1)}%\` | 3Y: \`${cagr3y.toFixed(1)}%\` (Ideal: >12%)\n`;
@@ -1792,7 +1795,7 @@ Provide the premium AI portfolio analyst report.`;
     try {
       await this.sendBotMessage(`🤖 *AI Sector Analyst Analysis starting for ${category}*...`);
       const aiSummary = await this.generateAiAnalysisSummary(analysis, `Watchlist Sector: ${category}`);
-      let header = `🤖 *AI Analyst Report: ${category}*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      let header = `🤖 *AI Analyst Report: ${category}*\n\n`;
 
       let parsed: any = null;
       try {
@@ -1901,8 +1904,7 @@ Provide the premium AI portfolio analyst report.`;
       const finalResults = directGrowth.length > 0 ? directGrowth : results;
       const limited = finalResults.slice(0, 15); // limit to 15 to fit in Telegram limits
 
-      let message = `🔍 <b>AMFI Search Results</b> for: <i>"${escapeHtml(query)}"</i>\n`;
-      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      let message = `🔍 <b>AMFI Search Results</b> for: <i>"${escapeHtml(query)}"</i>\n\n`;
 
       for (const r of limited) {
         const schemeName = escapeHtml(r.scheme_name);
@@ -1917,7 +1919,7 @@ Provide the premium AI portfolio analyst report.`;
         message += `  NAV: <b>₹${latestNav}</b> (${date})\n\n`;
       }
 
-      message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      message += `\n`;
       if (finalResults.length > 15) {
         message += `💡 <i>Showing top 15 of ${finalResults.length} matches. Try a more specific query if your fund is not listed.</i>\n\n`;
       }

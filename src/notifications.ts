@@ -9,6 +9,10 @@ export async function sendTelegramMessage(message: string, config: TelegramConfi
   const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
   
   let msgText = message;
+  if (config.parseMode === 'Markdown' || !config.parseMode) {
+    msgText = msgText.replace(/__(.*?)__/g, "*$1*");
+    msgText = msgText.replace(/<\/?u>/gi, "");
+  }
   if (msgText.length > 4000) {
     console.warn(`[Telegram] Message is too long (${msgText.length} chars). Truncating to 3900 chars...`);
     msgText = msgText.substring(0, 3900) + "\n\n[Message Truncated...]";
@@ -58,6 +62,10 @@ export async function editTelegramMessage(messageId: number, message: string, co
   const url = `https://api.telegram.org/bot${config.botToken}/editMessageText`;
   
   let msgText = message;
+  if (config.parseMode === 'Markdown' || !config.parseMode) {
+    msgText = msgText.replace(/__(.*?)__/g, "*$1*");
+    msgText = msgText.replace(/<\/?u>/gi, "");
+  }
   if (msgText.length > 4000) {
     console.warn(`[Telegram] Edited message is too long (${msgText.length} chars). Truncating to 3900 chars...`);
     msgText = msgText.substring(0, 3900) + "\n\n[Message Truncated...]";
