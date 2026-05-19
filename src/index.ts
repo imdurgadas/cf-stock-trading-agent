@@ -277,8 +277,12 @@ export class TradingAgent extends Agent<Env> {
     // Limit elements to prevent large tokens payload and potential worker timeouts
     const slicedData = sortedData.slice(0, 6).map(stock => ({
       symbol: stock.symbol,
+      name: stock.name,
       price: stock.ltp,
       change: stock.fall_pct,
+      quantity: stock.quantity,
+      average_price: stock.average_price,
+      pnl: stock.pnl,
       rsi: stock.rsi,
       adx: stock.adx,
       ema20_above: stock.price_above_ema20,
@@ -293,15 +297,38 @@ export class TradingAgent extends Agent<Env> {
 Your job is to analyze technical indicators for a list of stocks/ETFs and output a premium executive portfolio summary.
 
 For each asset, you MUST:
-1. State the symbol and the clear final recommendation: **BUY**, **SELL**, or **HOLD**.
-2. If the recommendation is **HOLD**: Suggest a realistic, strategic "Good price to sell" (target sell price) based on its current price, indicators, and moving averages, and briefly explain why.
-3. If it's a **BUY**: Explain the momentum drivers (like an RSI dip, bullish crossover, or volume surge).
-4. If it's a **SELL**: Detail the breakdown or overbought signals.
+1. State the name and symbol of the asset clearly, and the clear final recommendation: **BUY**, **SELL**, or **HOLD**.
+2. Explicitly list the computed technical indicators in a clean, readable inline format: current price, daily change %, RSI, ADX, EMA20/50 state, EMA crossover, MACD state, Bollinger Band state, and Volume Surge state.
+3. If the recommendation is **HOLD**: Suggest a realistic, strategic "Good price to sell" (target sell price) based on its current price, indicators, and moving averages, and briefly explain why.
+4. If it's a **BUY**: Explain the momentum drivers (like an RSI dip, bullish crossover, or volume surge).
+5. If it's a **SELL**: Detail the breakdown or overbought signals.
 
 Keep the advice highly actionable, precise, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
 
+    let portfolioTotals = null;
+    if (contextName.toLowerCase().includes("portfolio")) {
+      let totalInvested = 0;
+      let totalCurrent = 0;
+      for (const item of stockData) {
+        const qty = item.quantity || 0;
+        const avg = item.average_price || 0;
+        const ltp = item.ltp || item.price || 0;
+        totalInvested += qty * avg;
+        totalCurrent += qty * ltp;
+      }
+      const totalPnL = totalCurrent - totalInvested;
+      const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+      portfolioTotals = {
+        total_invested: totalInvested,
+        total_current_value: totalCurrent,
+        net_returns: totalPnL,
+        net_returns_pct: totalPnLPct
+      };
+    }
+
     const userPrompt = `Here is the technical indicator dataset for the "${contextName}":
-${JSON.stringify(slicedData, null, 2)}
+${portfolioTotals ? `Overall Portfolio Totals:\n${JSON.stringify(portfolioTotals, null, 2)}\n\n` : ""}
+Asset Details:\n${JSON.stringify(slicedData, null, 2)}
 
 Provide the premium executive AI analysis report.`;
 
@@ -312,7 +339,7 @@ Provide the premium executive AI analysis report.`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        max_tokens: 1000
+        max_tokens: 2048
       });
       console.info("[Agent] Workers AI returned a response.");
       const resultText = response.response || response.text || "No response received from AI agent.";
@@ -385,6 +412,13 @@ Provide the premium executive AI analysis report.`;
         name: meta.scheme_name || item.name,
         code: meta.scheme_code || item.schemeCode,
         house: meta.fund_house || item.fundHouse,
+        quantity: item.quantity,
+        average_price: item.average_price,
+        last_price: item.last_price,
+        invested_value: item.quantity && item.average_price ? (item.quantity * item.average_price) : undefined,
+        current_value: item.quantity && item.last_price ? (item.quantity * item.last_price) : undefined,
+        pnl: item.pnl,
+        pnl_pct: item.pnl_pct || (item.average_price && item.average_price > 0 && item.last_price ? ((item.last_price - item.average_price) / item.average_price * 100) : undefined),
         cagr_1y: returns.trailing_1y_cagr || mcpReturns.trailing_1y_cagr,
         cagr_3y: returns.trailing_3y_cagr || mcpReturns.trailing_3y_cagr,
         sharpe: risk.sharpe_ratio || mcpRisk.sharpe_ratio,
@@ -398,14 +432,37 @@ Your job is to analyze risk/reward metrics (CAGR returns, Sharpe/Sortino ratios,
 
 For each fund, you MUST:
 1. Provide a clear recommendation: **BUY**, **SELL**, or **HOLD**.
-2. If the recommendation is **HOLD**: Suggest under what conditions to sell/switch or what strategic performance parameters to track (e.g. if the CAGR drops below 12% or Sharpe ratio falls below 1.0).
-3. If it's a **BUY**: Explain the strong risk-adjusted performance features (high Sharpe/Sortino or excellent CAGR relative to volatility).
-4. If it's a **SELL**: Detail the risk parameters that are breaking down (e.g. high volatility, negative Sortino ratio, poor Benchmark returns).
+2. Explicitly list the computed mutual fund metrics: units/quantity, avg NAV, current/last NAV, invested value, current value, total P&L, trailing 1Y/3Y CAGR returns, Sharpe ratio, Sortino ratio, and Volatility.
+3. If the recommendation is **HOLD**: Suggest under what conditions to sell/switch or what strategic performance parameters to track (e.g. if the CAGR drops below 12% or Sharpe ratio falls below 1.0).
+4. If it's a **BUY**: Explain the strong risk-adjusted performance features (high Sharpe/Sortino or excellent CAGR relative to volatility).
+5. If it's a **SELL**: Detail the risk parameters that are breaking down (e.g. high volatility, negative Sortino ratio, poor Benchmark returns).
 
 Keep the advice highly professional, actionable, and formatted beautifully using clean Telegram Markdown (use **bold** and \`code\` only. DO NOT use nested tags, raw HTML, or complex markdown syntax that might break Telegram's parser). Add appropriate professional emojis. Keep the entire response under 3,000 characters total.`;
 
+    let portfolioTotals = null;
+    if (contextName.toLowerCase().includes("portfolio")) {
+      let totalInvested = 0;
+      let totalCurrent = 0;
+      for (const item of mfData) {
+        const qty = item.quantity || 0;
+        const avg = item.average_price || 0;
+        const ltp = item.last_price || 0;
+        totalInvested += qty * avg;
+        totalCurrent += qty * ltp;
+      }
+      const totalPnL = totalCurrent - totalInvested;
+      const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+      portfolioTotals = {
+        total_invested: totalInvested,
+        total_current_value: totalCurrent,
+        net_returns: totalPnL,
+        net_returns_pct: totalPnLPct
+      };
+    }
+
     const userPrompt = `Here is the mutual fund performance dataset for the "${contextName}":
-${JSON.stringify(mappedData, null, 2)}
+${portfolioTotals ? `Overall Portfolio Totals:\n${JSON.stringify(portfolioTotals, null, 2)}\n\n` : ""}
+Fund Details:\n${JSON.stringify(mappedData, null, 2)}
 
 Provide the premium AI portfolio analyst report.`;
 
@@ -416,7 +473,7 @@ Provide the premium AI portfolio analyst report.`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        max_tokens: 1000
+        max_tokens: 2048
       });
       console.info("[Agent] Workers AI returned a response for Mutual Funds.");
       const resultText = response.response || response.text || "No response received from AI agent.";
@@ -1087,39 +1144,28 @@ Provide the premium AI portfolio analyst report.`;
         return;
       }
 
-      let message = `🔍 <b>Holdings Technical Analysis</b>\n`;
-      message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-      for (const stock of analysis) {
-        const trend = stock.is_st_green ? "🟢" : "🔴";
-        const symbol = escapeHtml(stock.symbol);
-        const ltp = escapeHtml(stock.ltp);
-        const fallPctSign = stock.fall_pct >= 0 ? "+" : "";
-        const fallPctVal = stock.fall_pct.toFixed(2);
-        const rsiVal = stock.rsi?.toFixed(1) ?? "N/A";
-        const adxVal = stock.adx?.toFixed(1) ?? "N/A";
-        const adxFire = stock.adx >= 25 ? " 🔥" : "";
-
-        message += `<b>${symbol}</b> ${trend}\n`;
-        message += `• Price: ₹${ltp} (${fallPctSign}${fallPctVal}%)\n`;
-        message += `• RSI: ${rsiVal} | ADX: ${adxVal}${adxFire}\n`;
-        message += `• EMA20/50: ${stock.price_above_ema20 ? "✅ Above" : "❌ Below"}/${stock.price_above_ema50 ? "✅" : "❌"} (Crossover: ${stock.is_ema_bullish_crossover ? "🚀 BULLISH" : "❌"})\n`;
-        message += `• MACD Bullish: ${stock.is_macd_bullish ? "🟢 Yes" : "🔴 No"}\n`;
-        message += `• BB Lower Band: ${stock.is_near_bb_lower ? "⚠️ Yes (Oversold)" : "❌ No"}\n`;
-        message += `• Volume Surge: ${stock.is_volume_surge ? "🔥 Yes" : "❌ No"}\n\n`;
-      }
-
-      if (useMock) {
-        message += `\n⚠️ <i>This analysis is based on mock holdings.</i>`;
-      }
-
-      await this.sendBotHtmlMessage(message);
+      // Enrich analysis with portfolio holdings information
+      const enrichedAnalysis = analysis.map((stock: any) => {
+        const cleanSymbol = stock.symbol.replace(".NS", "");
+        const holding = holdings.find((h: any) => h.tradingsymbol?.toUpperCase() === cleanSymbol);
+        return {
+          ...stock,
+          name: holding?.name || cleanSymbol,
+          quantity: holding?.quantity,
+          average_price: holding?.average_price,
+          pnl: holding?.pnl || (holding?.quantity && holding?.average_price && stock.ltp ? (stock.ltp - holding.average_price) * holding.quantity : undefined)
+        };
+      });
 
       // Now fetch and send AI Portfolio analysis report
       try {
         await this.sendBotMessage("🤖 *AI Portfolio Analyst Analysis starting*...");
-        const aiSummary = await this.generateAiAnalysisSummary(analysis, "Active Portfolio Holdings");
-        await this.sendBotMessage(`🤖 *AI Portfolio Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
+        const aiSummary = await this.generateAiAnalysisSummary(enrichedAnalysis, "Active Portfolio Holdings");
+        let header = `🤖 *AI Portfolio Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        if (useMock) {
+          header = `⚠️ *Mock Mode Demo*\n` + header;
+        }
+        await this.sendBotMessage(`${header}${aiSummary}`);
       } catch (aiErr: any) {
         console.error("Failed to generate AI portfolio summary:", aiErr.message);
         await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
@@ -1272,105 +1318,15 @@ Provide the premium AI portfolio analyst report.`;
       allocationData.push({ name: h.name, value: current, pct: 0 });
     }
 
-    // 1. Send Header
-    await this.sendBotHtmlMessage(`🌾 <b>Mutual Fund Portfolio Health Scan</b>\n━━━━━━━━━━━━━━━━━━━━━`);
-
-    // 2. Send Individual Fund Technical Scan Cards in Chunks of 3
-    const CHUNK_SIZE = 3;
-    for (let i = 0; i < analyzed.length; i += CHUNK_SIZE) {
-      const chunk = analyzed.slice(i, i + CHUNK_SIZE);
-      let chunkMsg = "";
-
-      for (const h of chunk) {
-        const qty = h.quantity || 0;
-        if (qty === 0) continue;
-
-        const mcp = h.mcpAnalysis;
-        const fundName = escapeHtml(h.name);
-        const fundHouse = escapeHtml(h.fundHouse);
-        const schemeCode = escapeHtml(h.schemeCode);
-
-        chunkMsg += `• <b>${fundName}</b>\n`;
-        chunkMsg += `  House: <i>${fundHouse}</i> | Scheme: <code>${schemeCode}</code>\n`;
-        chunkMsg += `  Returns: 1Y CAGR: <b>${mcp?.returns?.trailing_1y_cagr ? mcp.returns.trailing_1y_cagr.toFixed(2) + "%" : "N/A"}</b> | 3Y CAGR: <b>${mcp?.returns?.trailing_3y_cagr ? mcp.returns.trailing_3y_cagr.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &gt;12%)</i>\n`;
-        chunkMsg += `  Risk Metrics: Sharpe: <b>${mcp?.risk_metrics?.sharpe_ratio ? mcp.risk_metrics.sharpe_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.0)</i> | Sortino: <b>${mcp?.risk_metrics?.sortino_ratio ? mcp.risk_metrics.sortino_ratio.toFixed(2) : "N/A"}</b> <i>(Ideal: &gt;1.5)</i>\n`;
-        chunkMsg += `  Volatility: <b>${mcp?.risk_metrics?.annualized_volatility_pct ? mcp.risk_metrics.annualized_volatility_pct.toFixed(2) + "%" : "N/A"}</b> <i>(Ideal: &lt;15% for stability)</i>\n\n`;
-      }
-
-      if (chunkMsg.trim()) {
-        await this.sendBotHtmlMessage(chunkMsg);
-      }
-    }
-
-    // Calculate asset allocation weights
-    if (totalCurrent > 0) {
-      for (const item of allocationData) {
-        item.pct = (item.value / totalCurrent) * 100;
-      }
-    }
-    allocationData.sort((a, b) => b.pct - a.pct);
-
-    const totalPnL = totalCurrent - totalInvested;
-    const totalPnLPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
-    const trend = totalPnL >= 0 ? "🟢" : "🔴";
-    const sign = totalPnL >= 0 ? "+" : "";
-
-    // 3. Send Portfolio Wealth Card & Summary
-    let summaryMsg = `💰 <b>Total Wealth</b>: ₹${totalCurrent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    summaryMsg += `💰 <b>Invested Value</b>: ₹${totalInvested.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
-    summaryMsg += `📈 <b>Net Returns</b>: <b>${trend} ${sign}₹${totalPnL.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (${sign}${totalPnLPct.toFixed(2)}%)\n\n`;
-
-    summaryMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    summaryMsg += `🏆 <b>Top Performer</b>:\n`;
-    if (topPerformer.name) {
-      const topSign = topPerformer.pnl >= 0 ? "+" : "";
-      const topName = escapeHtml(topPerformer.name);
-      const topHouse = escapeHtml(topPerformer.fundHouse);
-      const topCode = escapeHtml(topPerformer.schemeCode);
-      summaryMsg += `• <b>${topName}</b>\n`;
-      summaryMsg += `  House: <i>${topHouse}</i> | Scheme: <code>${topCode}</code>\n`;
-      summaryMsg += `  PnL: <b>${topSign}${topPerformer.pnlPct.toFixed(2)}%</b> (${topSign}₹${topPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
-    } else {
-      summaryMsg += `• N/A\n\n`;
-    }
-
-    summaryMsg += `📉 <b>Underperformer</b>:\n`;
-    if (underPerformer.name && underPerformer.symbol !== topPerformer.symbol) {
-      const underSign = underPerformer.pnl >= 0 ? "+" : "";
-      const underName = escapeHtml(underPerformer.name);
-      const underHouse = escapeHtml(underPerformer.fundHouse);
-      const underCode = escapeHtml(underPerformer.schemeCode);
-      summaryMsg += `• <b>${underName}</b>\n`;
-      summaryMsg += `  House: <i>${underHouse}</i> | Scheme: <code>${underCode}</code>\n`;
-      summaryMsg += `  PnL: <b>${underSign}${underPerformer.pnlPct.toFixed(2)}%</b> (${underSign}₹${underPerformer.pnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n\n`;
-    } else {
-      summaryMsg += `• N/A (Single asset portfolio or identical performers)\n\n`;
-    }
-
-    summaryMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    summaryMsg += `⚖️ <b>Asset Allocation & Diversification</b>:\n`;
-    for (const item of allocationData) {
-      const itemName = escapeHtml(item.name);
-      summaryMsg += `• <b>${itemName}</b>: ${item.pct.toFixed(1)}% of portfolio (₹${item.value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})\n`;
-    }
-
-    await this.sendBotHtmlMessage(summaryMsg);
-
-    // 4. Send Help and Guidelines Tip Footer
-    let footer = `━━━━━━━━━━━━━━━━━━━━━\n`;
-    footer += `📘 <i>Use /guidelines to view the full technical parameters guide.</i>`;
-
-    if (useMock) {
-      footer += `\n\n⚠️ <i>This analysis is based on mock mutual fund holdings.</i>`;
-    }
-
-    await this.sendBotHtmlMessage(footer);
-
     // Now call Workers AI to generate premium AI analysis for MF holdings
     try {
       await this.sendBotMessage("🤖 *AI Mutual Fund Analyst deep analysis starting*...");
       const aiSummary = await this.generateMFAiAnalysisSummary(analyzed, "Mutual Fund Portfolio Holdings");
-      await this.sendBotMessage(`🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n${aiSummary}`);
+      let header = `🤖 *AI Mutual Fund Analyst Report*\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      if (useMock) {
+        header = `⚠️ *Mock Mode Demo*\n` + header;
+      }
+      await this.sendBotMessage(`${header}${aiSummary}`);
     } catch (aiErr: any) {
       console.error("Failed to generate AI MF Holdings summary:", aiErr.message);
       await this.sendBotMessage(`⚠️ *AI Analysis Failed*: ${aiErr.message}`);
@@ -1381,6 +1337,7 @@ Provide the premium AI portfolio analyst report.`;
     return [
       {
         tradingsymbol: "NIFTYBEES",
+        name: "Nippon India ETF Nifty BeES",
         quantity: 100,
         average_price: 250.50,
         last_price: 262.30,
@@ -1389,6 +1346,7 @@ Provide the premium AI portfolio analyst report.`;
       },
       {
         tradingsymbol: "ITBEES",
+        name: "Nippon India ETF IT BeES",
         quantity: 150,
         average_price: 40.20,
         last_price: 38.50,
@@ -1397,6 +1355,7 @@ Provide the premium AI portfolio analyst report.`;
       },
       {
         tradingsymbol: "GOLDBEES",
+        name: "Nippon India ETF Gold BeES",
         quantity: 50,
         average_price: 60.10,
         last_price: 64.80,
