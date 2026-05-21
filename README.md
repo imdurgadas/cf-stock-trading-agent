@@ -113,6 +113,7 @@ To display a command suggestion menu when you type `/` in the chat, register the
     mf_analyze - Run mutual fund portfolio risk & returns analysis
     mf_watchlist - Run deep technical & risk scan on default 9-fund watchlist
     mf_search - Search AMFI master database for Direct Growth schemes
+    analyze - Run AI technical analysis on a specific stock (conversational)
     etf_analyze - Run automated ETF watchlist technical analysis
     it_analyze - Run IT sector watchlist technical analysis
     bank_analyze - Run banking sector watchlist technical analysis
@@ -130,12 +131,13 @@ The bot supports resilient command patterns, allowing you to trigger them with o
 | `/kite_login` | `kite_login` / `login` | N/A | Generates a secure authorization link to Zerodha Kite. **Session lasts 45 minutes.** |
 | `/kite_holdings` | `kite_holdings` / `holdings` | `mock holdings` | Fetches active equity/ETF holdings, formats P&L status, and prints totals. |
 | `/kite_analyze` | `kite_analyze` / `stock_analyze` / `analyze_holdings` | `mock analyze` | **Equity Holdings Scan**: Extracts active equity symbols, maps to NSE (`.NS`), and runs stock-mcp High-Conviction scans. |
+| `/analyze` | `analyze` / `analyze <symbol>` | N/A | **Single Stock Analysis**: Runs a deep technical scan on a specific stock and provides AI insights. Can be run with a symbol (e.g. `analyze INFY`) or conversationally. |
 | `/kite_trade <amount>` | `kite_trade <symbol> <amount>` / `trade <amount>` | N/A | Starts an order flow scan or targets a specific stock to buy (e.g. `kite_trade INFY 5000`). |
 | `/mf` | `mf` / `mf holdings` / `mutual fund holdings` | `mock mf` | Fetches active mutual fund holdings, average costs, current NAVs, and returns. |
 | `/mf_analyze` | `mf_analyze` / `analyze mf` / `mf_analysis` | `mock analyze mf` | **MF Portfolio Card**: Evaluates active mutual fund holdings returns, top/under-performers, and asset allocation. |
 | `/mf_watchlist` | `mf_watchlist` / `mf watchlist` / `analyze mf watchlist` | N/A | **MF Watchlist Scan**: Runs the deep technical indicator, CAGR, Sharpe/Sortino ratios, and graded analysis on our default **9-fund High-Conviction Mutual Fund watchlist** on-demand. **No Kite session required!** |
 | `/mf_search <query>` | `mf_search <query>` / `search_mf <query>` | N/A | **AMFI Search Engine**: Searches the 17,000+ active mutual fund registry from AMFI in real-time, matching wildcards (e.g. `mf_search Mirae`) and prioritizing direct growth schemes. |
-| `/etf_analyze` | `etf_analyze` / `analyze` / `do analysis` | N/A | **ETF Watchlist Scan**: Runs the technical analysis on the default **ETF** watchlist on-demand. **No Kite session required!** |
+| `/etf_analyze` | `etf_analyze` / `do analysis` | N/A | **ETF Watchlist Scan**: Runs the technical analysis on the default **ETF** watchlist on-demand. **No Kite session required!** |
 | `/it_analyze` | `it_analyze` / `analyze it` | N/A | **IT Watchlist Scan**: Evaluates the full technical indicators of the active IT sector watchlist on-demand. |
 | `/bank_analyze` | `bank_analyze` / `analyze bank` | N/A | **Banking Watchlist Scan**: Evaluates the full technical indicators of the active private and PSU banking watchlist on-demand. |
 | `/energy_analyze` | `energy_analyze` / `analyze energy` | N/A | **Energy Watchlist Scan**: Evaluates the full technical indicators of the active utility/energy sector watchlist on-demand. |

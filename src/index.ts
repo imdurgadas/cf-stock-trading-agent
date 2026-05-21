@@ -658,6 +658,27 @@ Provide the premium AI portfolio analyst report.`;
     // Strip leading slash if present to make command routing resilient and clean
     const text = rawText.startsWith("/") ? rawText.slice(1) : rawText;
 
+    // Check if we were waiting for a stock symbol for analysis.
+    // If the input is NOT another command, we treat it as a symbol.
+    const waitingForAnalyze = await this.ctx.storage.get<boolean>("waiting_for_analyze_symbol");
+    if (waitingForAnalyze) {
+      const isCommand = rawText.startsWith("/") || [
+        "kite_login", "login", "kite_holdings", "holdings", "mock holdings",
+        "mf", "mf holdings", "mock mf", "etf_analyze", "do analysis", "watchlist analysis",
+        "it_analyze", "bank_analyze", "energy_analyze", "potential_analyze",
+        "kite_analyze", "stock_analyze", "analyze_holdings", "mf_analyze", "analyze mf",
+        "mf_watchlist", "mf_search", "search_mf", "search mf", "guidelines", "guide", "help",
+        "kite_trade", "trade", "yes", "no", "analyze"
+      ].some(cmd => text.startsWith(cmd));
+
+      await this.ctx.storage.delete("waiting_for_analyze_symbol");
+      if (!isCommand) {
+        const symbol = text.toUpperCase().trim();
+        await this.handleSingleStockAnalysis(symbol);
+        return;
+      }
+    }
+
     // 1. Command: Kite Login
     if (text === "kite_login" || text === "kite login" || text === "login") {
       const loginUrl = `${this.env.BASE_URL}/kite-login?token=${this.env.AUTH_TOKEN}`;
@@ -696,12 +717,24 @@ Provide the premium AI portfolio analyst report.`;
     if (
       text === "etf_analyze" ||
       text === "do analysis" ||
-      text === "analyze" ||
       text === "analyze watchlists" ||
       text === "watchlist analysis"
     ) {
       await this.sendBotMessage("🔍 *ETF Watchlist Technical Scan Started*...");
       await this.startWatchlistAnalysis();
+      return;
+    }
+
+    // New Command: /analyze <symbol> or /analyze
+    if (text === "analyze" || text.startsWith("analyze ")) {
+      const parts = text.split(/\s+/);
+      if (parts.length > 1 && parts[1].trim()) {
+        const symbol = parts[1].toUpperCase().trim();
+        await this.handleSingleStockAnalysis(symbol);
+      } else {
+        await this.ctx.storage.put("waiting_for_analyze_symbol", true);
+        await this.sendBotMessage("🔍 *Stock Analysis*\n\nWhich stock would you like to analyze? Please reply with the stock symbol (e.g., `INFY`, `TCS`, or `RELIANCE`).");
+      }
       return;
     }
 
@@ -1240,6 +1273,76 @@ Provide the premium AI portfolio analyst report.`;
       parseMode: "Markdown",
       replyMarkup
     });
+  }
+
+  private async handleSingleStockAnalysis(symbol: string) {
+    let cleanSymbol = symbol.trim().toUpperCase();
+    if (!cleanSymbol) {
+      await this.sendBotMessage("⚠️ Stock symbol cannot be empty.");
+      return;
+    }
+
+    if (!cleanSymbol.includes(".")) {
+      cleanSymbol = `${cleanSymbol}.NS`;
+    }
+
+    await this.sendBotMessage(`🔍 *Stock Analysis Started*\nAnalyzing *${cleanSymbol}* using technical indicators...`);
+
+    try {
+      const analysis = await this.getWatchlistAnalysis([cleanSymbol]);
+      if (!analysis || analysis.length === 0) {
+        await this.sendBotMessage(`❌ Could not retrieve analysis metrics for *${cleanSymbol}*. Please verify the symbol is correct.`);
+        return;
+      }
+
+      const stock = analysis[0];
+      
+      // Fetch AI Analysis
+      await this.sendBotMessage("🤖 *AI Analyst starting review...*");
+      const aiSummary = await this.generateAiAnalysisSummary([stock], `Stock: ${cleanSymbol}`);
+      
+      let parsed: any = null;
+      try {
+        parsed = this.cleanAndParseJSON(aiSummary);
+      } catch (e) {
+        console.warn("Failed to parse AI summary as JSON for single stock:", e);
+      }
+
+      const changeSign = (stock.fall_pct || 0) >= 0 ? '+' : '';
+      const rsiVal = stock.rsi ? stock.rsi.toFixed(1) : 'N/A';
+      const adxVal = stock.adx ? stock.adx.toFixed(1) : 'N/A';
+      const trendStrength = (stock.adx || 0) >= 25 ? 'Strong' : 'Weak';
+
+      const signals = [];
+      if (stock.is_ema_bullish_crossover) signals.push('Bullish Crossover 🚀');
+      if (stock.is_macd_bullish) signals.push('MACD Bullish 📈');
+      if (stock.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️');
+      if (stock.is_volume_surge) signals.push('Volume Surge 🔥');
+      if (signals.length === 0) signals.push('None (Neutral)');
+
+      let message = `📈 *Stock Analysis: ${stock.name || cleanSymbol} (${cleanSymbol.replace(".NS", "")})*\n\n`;
+      message += `• *LTP*: ₹${stock.ltp || 'N/A'} (${changeSign}${stock.fall_pct?.toFixed(2) || '0.00'}%)\n`;
+      message += `• *RSI*: \`${rsiVal}\` | *ADX*: \`${adxVal}\` (${trendStrength} Trend)\n`;
+      message += `• *EMA State*: Price is ${stock.price_above_ema20 ? 'Above' : 'Below'} EMA20 & ${stock.price_above_ema50 ? 'Above' : 'Below'} EMA50\n`;
+      message += `• *Signals*: ${signals.join(', ')}\n\n`;
+
+      if (parsed && parsed.assets) {
+        const key = cleanSymbol;
+        const cleanKey = cleanSymbol.replace(".NS", "");
+        const aiAsset = parsed.assets[key] || parsed.assets[cleanKey] || parsed.assets[key.toLowerCase()] || parsed.assets[cleanKey.toLowerCase()] || Object.values(parsed.assets)[0] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found.' };
+        
+        const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
+        message += `*AI Recommendation*: *${recEmoji}*\n`;
+        message += `🤖 *AI Outlook*:\n${aiAsset.actionable_insight}`;
+      } else {
+        message += `🤖 *AI Analysis (Raw)*:\n${aiSummary}`;
+      }
+
+      await this.sendBotMessage(message);
+    } catch (err: any) {
+      console.error(`Failed handleSingleStockAnalysis for ${cleanSymbol}:`, err.message);
+      await this.sendBotMessage(`❌ *Analysis Failed*: ${err.message}`);
+    }
   }
 
   private async handleAnalyzeHoldings(useMock: boolean) {
@@ -2034,6 +2137,7 @@ export default {
         { command: "kite_login", description: "Authenticate Zerodha Kite session (expires in 45 min)" },
         { command: "kite_holdings", description: "Fetch active Zerodha stock/ETF holdings" },
         { command: "kite_analyze", description: "Run AI technical analysis on Kite stock holdings" },
+        { command: "analyze", description: "Run AI technical analysis on a specific stock (conversational)" },
         { command: "etf_analyze", description: "Scan ETF watchlist technical indicators" },
         { command: "mf", description: "Fetch active mutual fund holdings" },
         { command: "mf_analyze", description: "Run AI risk analysis on mutual fund holdings" },
