@@ -265,7 +265,7 @@ export class TradingAgent extends Agent<Env> {
       const cached = await this.ctx.storage.get<string>(cacheKey);
       if (cached) {
         console.info(`[Agent] Returning cached AI report for ${cacheKey}`);
-        return cached;
+        return cached.replace(/\$/g, "₹");
       }
     } catch (cacheErr: any) {
       console.warn(`[Agent] Cache read failed:`, cacheErr.message);
@@ -299,6 +299,7 @@ You MUST output ONLY a valid JSON object matching the schema below. Do NOT inclu
 Formatting constraints:
 - Do NOT use double underscores (__text__) or HTML underline tags (<u>) anywhere.
 - If you wish to emphasize words, use standard single asterisks (*bold*) for bolding.
+- All monetary/currency references MUST be in Indian Rupees (INR / ₹). Do NOT use US Dollars ($). Ensure you write prices with prefix '₹' or suffix 'INR' (e.g. ₹110 instead of $110).
 
 Schema:
 {
@@ -370,6 +371,10 @@ Provide the premium executive AI analysis report.`;
       } else {
         resultText = "No response received from AI agent.";
       }
+
+      if (resultText) {
+        resultText = resultText.replace(/\$/g, "₹");
+      }
       
       if (resultText && !resultText.startsWith("❌") && !resultText.startsWith("⚠️")) {
         try {
@@ -411,7 +416,7 @@ Provide the premium executive AI analysis report.`;
       const cached = await this.ctx.storage.get<string>(cacheKey);
       if (cached) {
         console.info(`[Agent] Returning cached AI report for ${cacheKey}`);
-        return cached;
+        return cached.replace(/\$/g, "₹");
       }
     } catch (cacheErr: any) {
       console.warn(`[Agent] Cache read failed:`, cacheErr.message);
@@ -460,6 +465,7 @@ You MUST output ONLY a valid JSON object matching the schema below. Do NOT inclu
 Formatting constraints:
 - Do NOT use double underscores (__text__) or HTML underline tags (<u>) anywhere.
 - If you wish to emphasize words, use standard single asterisks (*bold*) for bolding.
+- All monetary/currency references MUST be in Indian Rupees (INR / ₹). Do NOT use US Dollars ($). Ensure you write prices with prefix '₹' or suffix 'INR' (e.g. ₹110 instead of $110).
 
 Schema:
 {
@@ -530,6 +536,10 @@ Provide the premium AI portfolio analyst report.`;
         }
       } else {
         resultText = "No response received from AI agent.";
+      }
+
+      if (resultText) {
+        resultText = resultText.replace(/\$/g, "₹");
       }
 
       if (resultText && !resultText.startsWith("❌") && !resultText.startsWith("⚠️")) {
@@ -1230,6 +1240,80 @@ Provide the premium AI portfolio analyst report.`;
     return JSON.parse(cleaned);
   }
 
+  private getAiAssetAnalysis(assets: any, identifiers: (string | undefined | null)[]): any {
+    if (!assets || typeof assets !== "object") return null;
+    
+    // Filter out null/undefined/empty identifiers
+    const validIds = identifiers
+      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      .map(id => id.trim().toLowerCase());
+    
+    if (validIds.length === 0) return null;
+
+    const keys = Object.keys(assets);
+    
+    // Helper to normalize strings for comparison (remove spaces, dots, dashes, etc.)
+    const normalize = (s: string) => s.replace(/[^a-z0-9]/g, "");
+
+    // 1. Exact match (case insensitive)
+    for (const id of validIds) {
+      for (const key of keys) {
+        if (key.toLowerCase().trim() === id) {
+          return assets[key];
+        }
+      }
+    }
+
+    // 2. Suffix/prefix stripping (like removing .NS, .BO, etc.)
+    const cleanId = (s: string) => s.replace(/\.(ns|bo)$/, "").trim();
+    const cleanIds = validIds.map(cleanId);
+    
+    for (const cid of cleanIds) {
+      for (const key of keys) {
+        const cKey = key.toLowerCase().trim().replace(/\.(ns|bo)$/, "");
+        if (cKey === cid) {
+          return assets[key];
+        }
+      }
+    }
+
+    // 3. Normalization (alphanumeric match)
+    const normalizedIds = cleanIds.map(normalize);
+    for (const nid of normalizedIds) {
+      if (!nid) continue;
+      for (const key of keys) {
+        const nKey = normalize(key.toLowerCase());
+        if (nKey === nid) {
+          return assets[key];
+        }
+      }
+    }
+
+    // 4. Substring containment match (only if identifier has reasonable length, e.g. >= 3 chars)
+    for (const cid of cleanIds) {
+      if (cid.length < 3) continue;
+      for (const key of keys) {
+        const cKey = key.toLowerCase().trim().replace(/\.(ns|bo)$/, "");
+        if (cKey.includes(cid) || cid.includes(cKey)) {
+          return assets[key];
+        }
+      }
+    }
+    
+    // 5. Normalized substring containment match
+    for (const nid of normalizedIds) {
+      if (nid.length < 3) continue;
+      for (const key of keys) {
+        const nKey = normalize(key.toLowerCase());
+        if (nKey.includes(nid) || nid.includes(nKey)) {
+          return assets[key];
+        }
+      }
+    }
+
+    return null;
+  }
+
   private async handleSlideNavigation(chatId: number, messageId: number, type: string, slideIndex: number) {
     let key = "latest_stock_slides";
     if (type === "mf") {
@@ -1316,7 +1400,7 @@ Provide the premium AI portfolio analyst report.`;
       const signals = [];
       if (stock.is_ema_bullish_crossover) signals.push('Bullish Crossover 🚀');
       if (stock.is_macd_bullish) signals.push('MACD Bullish 📈');
-      if (stock.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️');
+      if (stock.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️ (Oversold / Price Dip Entry Zone)');
       if (stock.is_volume_surge) signals.push('Volume Surge 🔥');
       if (signals.length === 0) signals.push('None (Neutral)');
 
@@ -1327,9 +1411,7 @@ Provide the premium AI portfolio analyst report.`;
       message += `• *Signals*: ${signals.join(', ')}\n\n`;
 
       if (parsed && parsed.assets) {
-        const key = cleanSymbol;
-        const cleanKey = cleanSymbol.replace(".NS", "");
-        const aiAsset = parsed.assets[key] || parsed.assets[cleanKey] || parsed.assets[key.toLowerCase()] || parsed.assets[cleanKey.toLowerCase()] || Object.values(parsed.assets)[0] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found.' };
+        const aiAsset = this.getAiAssetAnalysis(parsed.assets, [cleanSymbol, cleanSymbol.replace(".NS", "")]) || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found.' };
         
         const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
         message += `*AI Recommendation*: *${recEmoji}*\n`;
@@ -1454,7 +1536,7 @@ Provide the premium AI portfolio analyst report.`;
             const item = enrichedAnalysis[i];
             const sym = item.symbol;
             const cleanSym = sym.replace(".NS", "");
-            const aiAsset = parsed.assets[sym] || parsed.assets[cleanSym] || parsed.assets[sym.toLowerCase()] || parsed.assets[cleanSym.toLowerCase()] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this symbol.' };
+            const aiAsset = this.getAiAssetAnalysis(parsed.assets, [sym, cleanSym]) || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this symbol.' };
             
             const changeSign = (item.fall_pct || 0) >= 0 ? '+' : '';
             const pnlVal = item.pnl || 0;
@@ -1472,7 +1554,7 @@ Provide the premium AI portfolio analyst report.`;
             const signals = [];
             if (item.is_ema_bullish_crossover) signals.push('Bullish Crossover 🚀');
             if (item.is_macd_bullish) signals.push('MACD Bullish 📈');
-            if (item.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️');
+            if (item.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️ (Oversold / Price Dip Entry Zone)');
             if (item.is_volume_surge) signals.push('Volume Surge 🔥');
             if (signals.length === 0) signals.push('None (Neutral)');
             
@@ -1571,7 +1653,7 @@ Provide the premium AI portfolio analyst report.`;
           const code = String(item?.meta?.scheme_code || "N/A");
           
           // Match AI recommendation by code or name
-          const aiAsset = parsed.assets[code] || parsed.assets[schemeName] || parsed.assets[schemeName.toLowerCase()] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this fund.' };
+          const aiAsset = this.getAiAssetAnalysis(parsed.assets, [code, schemeName]) || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this fund.' };
           
           const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
 
@@ -1729,7 +1811,7 @@ Provide the premium AI portfolio analyst report.`;
           const code = String(item.schemeCode || item.meta?.scheme_code);
           const name = item.name;
           const fundHouse = item.fundHouse || item.meta?.fund_house || 'N/A';
-          const aiAsset = parsed.assets[name] || parsed.assets[code] || parsed.assets[item.meta?.scheme_name] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this fund.' };
+          const aiAsset = this.getAiAssetAnalysis(parsed.assets, [name, code, item.meta?.scheme_name]) || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this fund.' };
 
           const returns = item.returns || item.mcpAnalysis?.returns || {};
           const risk = item.risk_metrics || item.mcpAnalysis?.risk_metrics || {};
@@ -1930,7 +2012,7 @@ Provide the premium AI portfolio analyst report.`;
           const item = analysis[i];
           const sym = item.symbol;
           const cleanSym = sym.replace(".NS", "");
-          const aiAsset = parsed.assets[sym] || parsed.assets[cleanSym] || parsed.assets[sym.toLowerCase()] || parsed.assets[cleanSym.toLowerCase()] || Object.values(parsed.assets)[i] || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this symbol.' };
+          const aiAsset = this.getAiAssetAnalysis(parsed.assets, [sym, cleanSym]) || { recommendation: 'HOLD', actionable_insight: 'No specific AI analysis found for this symbol.' };
           
           const recEmoji = aiAsset.recommendation === 'BUY' ? '🚀 BUY' : aiAsset.recommendation === 'SELL' ? '🚫 SELL' : '🤔 HOLD';
 
@@ -1943,7 +2025,7 @@ Provide the premium AI portfolio analyst report.`;
           const signals = [];
           if (item.is_ema_bullish_crossover) signals.push('Bullish Crossover 🚀');
           if (item.is_macd_bullish) signals.push('MACD Bullish 📈');
-          if (item.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️');
+          if (item.is_near_bb_lower) signals.push('BB Near Lower Band ⚠️ (Oversold / Price Dip Entry Zone)');
           if (item.is_volume_surge) signals.push('Volume Surge 🔥');
           if (signals.length === 0) signals.push('None (Neutral)');
           
